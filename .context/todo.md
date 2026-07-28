@@ -35,12 +35,19 @@ Every implementation phase must preserve these invariants:
       outside `typescript-eslint`'s `typescript >=4.8.4 <6.1.0` peer range, so
       `npm ci` fails with `ERESOLVE` before any check runs. The pin is back at
       `^6.0.3` and TypeScript majors are ignored in Dependabot until
-      `typescript-eslint` ships a stable release that widens the range.
-- [ ] Configure branch protection or a ruleset for `main` after the first PR is
-      merged. Require the `Quality / Node 24`, `Lint workflows`, and
-      `Audit dependencies` checks. `Audit dependencies` had to lose its
-      `pull_request` path filter first, because a required check that is skipped
-      leaves unrelated pull requests pending forever.
+      `typescript-eslint` ships a stable release that widens the range. All
+      three checks pass on
+      [PR #6](https://github.com/fschrhunt/zen-agent/pull/6); this item stays
+      open until that merges and `main` itself is green again.
+- [x] Configure branch protection or a ruleset for `main` after the first PR is
+      merged. The active `main` ruleset (2026-07-28) requires a pull request and
+      the `Quality / Node 24`, `Lint workflows`, and `Audit dependencies`
+      checks, and blocks deletion and force pushes. It requires zero approvals,
+      because GitHub does not let a sole maintainer approve their own pull
+      request; repository admins keep an `always` bypass as the escape hatch.
+      Revisit both once there is a second maintainer. `Audit dependencies` had
+      to lose its `pull_request` path filter first, because a required check
+      that is skipped leaves unrelated pull requests pending forever.
 - [x] Decide whether the repository will remain private or become public. It is
       public.
 - [x] Select and add a license before copying or accepting outside code. MIT,
