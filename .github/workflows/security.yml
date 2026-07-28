@@ -8,11 +8,9 @@ on:
       - package.json
       - package-lock.json
       - .github/workflows/security.yml
+  # Not path-filtered: this check is required on `main`, and a required check
+  # that is skipped leaves every unrelated pull request pending forever.
   pull_request:
-    paths:
-      - package.json
-      - package-lock.json
-      - .github/workflows/security.yml
   schedule:
     - cron: "23 10 * * 1"
   workflow_dispatch:
