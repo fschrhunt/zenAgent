@@ -72,10 +72,14 @@ proven items are re-runnable with `npm run spike:transport`.
       macOS 27.0 arm64 / Node 26.5.0; daily profile
       `tddguwg7.Default (release)`.
 - [x] Determine whether Zen can expose a remote protocol from an already running
-      daily-use browser session. **No.** The running Zen was launched with no
-      flags and holds no listening socket, and there is no pref or runtime call
-      that starts the remote agent after launch. Zen must be started with
-      `--remote-debugging-port`, which makes this an onboarding problem.
+      daily-use browser session. **Not BiDi, but yes via DevTools RDP.** The
+      BiDi remote agent can only be armed from a `STATE_INITIAL_LAUNCH` command
+      line. However `DevToolsStartup` handles **forwarded** command lines, so
+      `zen --profile <same> --start-debugger-server <port>` starts a
+      chrome-privileged server (`allowChromeProcess = true`, `keepAlive = true`)
+      inside a live session, gated only on `devtools.debugger.remote-enabled`
+      and `devtools.chrome.enabled` read live. Costs a one-time pref bootstrap,
+      and possibly one macOS window raise per browser run.
 - [x] Test Firefox Remote Agent/WebDriver BiDi with Zen. Works unmodified; Zen
       inherits the Firefox remote agent. Connect to `ws://host:port/session`,
       not the bare URL Zen prints.

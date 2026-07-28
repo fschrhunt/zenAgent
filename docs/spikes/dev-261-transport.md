@@ -20,19 +20,68 @@ The daily profile lives at
 the one used for all read-only profile inspection below. No spike step has
 written to it.
 
-## 1. A running Zen cannot be attached to
+## 1. A running Zen cannot be attached to over BiDi — but can over DevTools RDP
 
 **Proven.** The daily-use Zen process was launched with no arguments at all
 (`/Applications/Zen.app/Contents/MacOS/zen`) and holds no listening TCP socket —
-`lsof -nP -iTCP -sTCP:LISTEN` against its pid returns nothing. The remote agent
-is off, and there is no pref or runtime call that turns it on in an
-already-running process.
+`lsof -nP -iTCP -sTCP:LISTEN` against its pid returns nothing.
 
-The consequence sets the shape of the whole product: **the user must start Zen
-with `--remote-debugging-port` for Zen Agent to work at all.** Attaching to a
-session that is already open is not possible. This is a startup/onboarding
-problem, not a transport problem, and it needs an explicit answer in the product
-(a launch helper, a login item, or documented instructions).
+For **BiDi specifically this is terminal.** `RemoteAgent.sys.mjs` sets its
+`#enabled` flag only from the `command-line-startup` observer, which is
+unregistered on first fire and is notified only for a `STATE_INITIAL_LAUNCH`
+command line. `nsIRemoteAgent` exposes a single read-only `running` boolean, so
+there is no supported call that starts a listener later.
+
+**But the legacy DevTools remote protocol can be started in a running
+instance**, and that changes the product's shape. Verified in the shipped
+`browser/modules/DevToolsStartup.sys.mjs`:
+
+- `DevToolsStartup` is registered as a `command-line-handler`, so it runs for
+  **forwarded** command lines, not just the initial launch.
+- In `handle()` (line 359), the `if (flags.devToolsServer)` branch sits
+  **outside** the `if (isInitialLaunch)` block (line 414 vs 365).
+- `handleDevToolsServerFlag` sets `cmdLine.preventDefault = true` when
+  `cmdLine.state == STATE_REMOTE_AUTO` — it is explicitly written for the
+  forwarded case.
+- It sets `devToolsServer.allowChromeProcess = true` and
+  `devToolsServer.keepAlive = true`, so one invocation yields a
+  **parent-process, chrome-privileged** server that outlives client disconnects.
+
+So `zen --profile <same-profile> --start-debugger-server <port>` against an
+already-running Zen starts a privileged debugging server in that live session,
+with no restart and no launch flag.
+
+The gate is two preferences, read live at call time via
+`Services.prefs.getBoolPref` (no startup snapshot):
+
+```
+devtools.debugger.remote-enabled = true
+devtools.chrome.enabled          = true
+```
+
+**The catch is a one-time bootstrap.** Those prefs live in `prefs.js` and are
+read from the profile, so setting them requires either an `about:config` edit or
+writing `user.js` and restarting once. After that, every subsequent Zen session
+is attachable with no further disruption. That is a materially better onboarding
+story than "always launch Zen with `--remote-debugging-port`", which is what
+this document previously concluded.
+
+**Two caveats, neither yet measured here:**
+
+- On macOS, `nsRemoteService::StartClient` reportedly passes a hardcoded
+  `aRaise = true`, and `nsMacRemoteServer.mm` calls `SetFrontProcess` _after_
+  `cmdLine->Run()`, so `preventDefault` does not suppress it. If so, the
+  forwarded invocation **activates the Zen window once per browser run**. That
+  is a real focus violation, though a one-time one, since `keepAlive` keeps the
+  listener up. This is C++ and not verifiable from `omni.ja`; it needs a headed
+  measurement.
+- The DevTools RDP is a legacy, internal protocol with no stability guarantee
+  for third parties. Building on it is a maintenance bet.
+
+This path was **not** exercised against a live instance here, deliberately: a
+forwarded command line is matched by profile, and getting it wrong would raise
+or attach to the user's daily browser. It should be tested on a scratch profile
+first, then on the daily one with consent.
 
 ## 2. WebDriver BiDi works; CDP no longer exists
 
@@ -299,11 +348,11 @@ A plain WebExtension does not rescue this — it enumerates through the same
 `gBrowser.tabs`, so `tabs.query({})` has exactly the same blind spot, and
 `tabs.update({active: true})` switches the Space.
 
-The path that does work is a **privileged `experiment_apis` extension**, whose
-parent script runs in a system-principal sandbox and can call
-`gZenWorkspaces.allStoredTabs` (which walks every `<zen-workspace>`) and
-`gZenWorkspaces.moveTabToWorkspace(tab, uuid)` (an attribute-and-DOM move with
-no visible change).
+What does work is reaching `gZenWorkspaces` from chrome-privileged JS, where
+`allStoredTabs` walks every `<zen-workspace>` and
+`moveTabToWorkspace(tab, uuid)` is an attribute-and-DOM move with no visible
+change. Two ways in: the DevTools RDP server from §1, or a privileged
+`experiment_apis` extension.
 
 Zen is unusually hospitable to this, which was verified against the shipped
 `AppConstants.sys.mjs`:
@@ -320,10 +369,26 @@ Firefox Release. Zen ships `extensions.experiments.enabled = false` and
 but on Zen, flipping them actually works.
 
 That points at a **hybrid**: BiDi for page-level work, where it is proven and
-excellent, and a small privileged extension for Space enumeration, Space
-membership, and Space-targeted tab creation. The cost is real: an unsigned
-privileged add-on, re-loaded on every restart unless signature enforcement is
-disabled, using an API Mozilla documents as unstable.
+excellent, and a privileged chrome-JS channel for Space enumeration, Space
+membership, and Space-targeted tab creation. There are two candidates for that
+second channel, and they are not equivalent:
+
+|                                 | Privileged extension         | DevTools RDP (§1)                |
+| ------------------------------- | ---------------------------- | -------------------------------- |
+| Reaches `gZenWorkspaces`        | yes                          | yes                              |
+| Needs an add-on                 | yes, unsigned + privileged   | **no**                           |
+| Needs signature enforcement off | yes, or reload every restart | no                               |
+| Setup                           | install add-on, flip 2 prefs | flip 2 prefs, restart once       |
+| Attach to a running session     | n/a                          | yes, no restart                  |
+| Protocol stability              | `experiment_apis`, unstable  | legacy RDP, unstable             |
+| Known focus cost                | none                         | one window raise per browser run |
+
+The RDP path is the cheaper of the two — no add-on, no signing changes, and it
+solves §1 and §8 with the same mechanism. Its unknown is the macOS window raise.
+The extension path has no focus cost but a much heavier install story.
+
+Either way the shape is the same: **BiDi cannot be the only transport**, and the
+second channel must be chrome-privileged.
 
 ## Open questions still to test
 
@@ -332,6 +397,16 @@ means restarting the user's daily Zen with `--remote-debugging-port`:
 
 - **Confirm §8 empirically**: with Personal visible, does
   `browsingContext.getTree` really omit every Work tab?
+- **Confirm §1 empirically**, on a scratch profile first: does
+  `--start-debugger-server` forwarded into a running Zen open a privileged
+  server, and does it raise the window on macOS?
+- Do lazy/session-restored tabs appear in `getTree` at all? Upstream
+  [bug 1876240](https://bugzilla.mozilla.org/show_bug.cgi?id=1876240) says a tab
+  with a null `browsingContext` is silently omitted, which on a restored daily
+  profile could hide most tabs even within the visible Space.
+- Does macOS occlusion matter in practice? `RecomputeAppWindowVisibility`
+  deactivates every tab in a fully occluded window, so a full-screen terminal
+  covering Zen may itself break background operation.
 - Does a BiDi-created tab land in the Zen Space bound to its container, or in
   whichever Space is currently visible?
 - Does opening a background tab ever cause Zen to switch the visible Space?
