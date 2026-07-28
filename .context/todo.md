@@ -92,10 +92,13 @@ proven items are re-runnable with `npm run spike:transport`.
       `navigationStarted`, `domContentLoaded`, `load`. **No selection event and
       no selected-tab field exists**, so selected state must be modelled as
       unknown rather than guessed.
-- [ ] Test whether Zen exposes its Space IDs, names, order, and tab membership
-      through the remote protocol. Not through BiDi: `browser.getUserContexts`
-      returns only opaque per-session UUIDs. Space data does exist on disk in
-      `zen-sessions.jsonlz4`.
+- [x] Test whether Zen exposes its Space IDs, names, order, and tab membership
+      through the remote protocol. **No, and worse.** `browser.getUserContexts`
+      returns only opaque per-session UUIDs, and `browsingContext.getTree`
+      enumerates through `gBrowser.tabs`, which Zen rewrote to return the
+      **active Space's tabs only**. BiDi cannot see, address, or reuse a tab in
+      a non-visible Space. Traced through the shipped `omni.ja`; still needs
+      empirical confirmation on a two-Space profile.
 - [x] Test whether Firefox container identity is sufficient to infer Zen Space
       membership. Sufficient **on disk** — each Space carries a `containerTabId`
       matching a `containers.json` `userContextId`, and tabs agree. Not
@@ -106,10 +109,19 @@ proven items are re-runnable with `npm run spike:transport`.
         operation; cannot see Zen Spaces or stable container identity.
   - [x] CDP. **Ruled out.** Removed from Gecko entirely in Firefox 141; Zen 153
         has no CDP and no pref brings it back.
-  - [ ] A privileged Zen/Firefox extension.
-  - [ ] An extension plus Native Messaging host.
-  - [ ] A hybrid in which BiDi handles pages and an extension supplies
-        Zen-specific Space metadata.
+  - [x] A plain Zen/Firefox extension. **Ruled out.** It enumerates through the
+        same `gBrowser.tabs`, so `tabs.query({})` has the identical
+        active-Space-only blind spot, and `tabs.update({active:true})` on a
+        foreign-Space tab switches the visible Space.
+  - [ ] A privileged `experiment_apis` extension. Viable: Zen ships
+        `MOZ_REQUIRE_SIGNING: false`, so `extensions.experiments.enabled` is a
+        live pref and the parent script gets a system-principal sandbox with
+        `gZenWorkspaces.allStoredTabs` and `moveTabToWorkspace`.
+  - [ ] An extension plus Native Messaging host. Note an open native port is the
+        only supported way to keep an MV3 event page alive; a WebSocket is not,
+        and the default MV3 CSP silently upgrades `ws://` to `wss://`.
+  - [ ] A hybrid in which BiDi handles pages and a privileged extension supplies
+        Zen-specific Space metadata. Current front-runner.
 - [ ] Prove that the transport can list tabs without changing selected tab,
       focused window, or visible Space. Selected tab and focused window proven.
       Visible Space needs a headed run.

@@ -238,17 +238,102 @@ but it depends on an undocumented ordering guarantee and on parsing two private
 on-disk formats. An extension reads `cookieStoreId` (`firefox-container-4`)
 directly and needs none of it.
 
+## 8. BiDi is blind to every Space except the visible one
+
+**This is the finding that decides the architecture.** It was traced through the
+code Zen actually ships, by extracting `omni.ja` and `browser/omni.ja` from
+`/Applications/Zen.app` — not from the GitHub tree, which may not match the
+installed build.
+
+The enumeration chain is unbroken:
+
+| Step | File (shipped)                                            | Code                                                                                       |
+| ---- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 1    | `webdriver-bidi/modules/root/browsingContext.sys.mjs:950` | `contexts = TabManager.getBrowsers().map(...)`                                             |
+| 2    | `remote/shared/TabManager.sys.mjs:25`                     | `allTabs` → `windows.flatMap(win => this.getTabsForWindow(win))`                           |
+| 3    | `remote/shared/TabManager.sys.mjs:194`                    | `getTabsForWindow` → `getTabBrowser(win).tabs` → `win.gBrowser`                            |
+| 4    | `browser/tabbrowser/tabbrowser.js:529`                    | `get tabs() { return this.tabContainer.allTabs; }`                                         |
+| 5    | `browser/tabbrowser/tabs.js` (Zen-patched)                | `get allTabs()` → `let unpinnedChildren = gZenWorkspaces.tabboxChildren;`                  |
+| 6    | `modules/zen/ZenSpaceManager.mjs:316`                     | `get tabboxChildren() { return Array.from(this.activeWorkspaceStrip?.children \|\| []); }` |
+| 7    | `modules/zen/ZenSpaceManager.mjs:291`                     | `activeWorkspaceStrip` → `this.activeWorkspaceElement?.tabsContainer`                      |
+
+Zen replaced `allTabs` so that it reads the children of the **active**
+`<zen-workspace>` element only, plus `getCurrentEssentialsContainer()`. Every
+Space lives as a separate `<zen-workspace>` in the same window, and the inactive
+ones are hidden purely by CSS (`-moz-subtree-hidden-only-visually`).
+
+Therefore `browsingContext.getTree` returns **only the tabs in the Space the
+user is currently looking at**, plus current-container essentials. Tabs in other
+Spaces are not returned as hidden or discarded — they are absent. Zen
+deliberately stopped using `tab.hidden` for this, so there is no flag to filter
+on.
+
+This directly contradicts DEV-261's premise. Zen Agent cannot "discover and
+operate the user's existing session" over BiDi alone, because with Personal
+visible it cannot see, address, or reuse a single Work tab. The stable-ID reuse
+promise in the product principles is unimplementable on this transport by
+itself.
+
+Two further consequences, from the same shipped sources:
+
+- Zen patches `set selectedTab` to call `gZenWorkspaces.onBeforeTabSelect`,
+  which calls `changeWorkspaceWithID` when the target tab belongs to another
+  Space. Anything that selects a foreign-Space tab **switches the visible
+  Space**. Zen has a regression test asserting this
+  (`browser_select_tab_switches_space.js`), so it is intended behaviour, not a
+  bug to route around.
+- `onTabBrowserInserted` stamps a new tab with the **currently active** Space's
+  uuid. The only path that targets another Space also sets the
+  `change-workspace` attribute, which forces the switch. So a background tab
+  opened in a chosen Space is not reachable this way either.
+
+**Not yet confirmed empirically.** The code chain is unambiguous, but it has not
+been observed against a live profile with two Spaces, because the scratch
+profiles used here only ever have one. This is the single most important thing
+to verify in the headed run below; if it somehow does not reproduce, the
+architecture opens back up.
+
+## 9. What that leaves
+
+A plain WebExtension does not rescue this — it enumerates through the same
+`gBrowser.tabs`, so `tabs.query({})` has exactly the same blind spot, and
+`tabs.update({active: true})` switches the Space.
+
+The path that does work is a **privileged `experiment_apis` extension**, whose
+parent script runs in a system-principal sandbox and can call
+`gZenWorkspaces.allStoredTabs` (which walks every `<zen-workspace>`) and
+`gZenWorkspaces.moveTabToWorkspace(tab, uuid)` (an attribute-and-DOM move with
+no visible change).
+
+Zen is unusually hospitable to this, which was verified against the shipped
+`AppConstants.sys.mjs`:
+
+```
+MOZ_REQUIRE_SIGNING: false
+MOZ_UNSIGNED_APP_SCOPE: true
+```
+
+Because `MOZ_REQUIRE_SIGNING` is false, `AddonSettings.EXPERIMENTS_ENABLED` is
+bound as a **live preference** rather than frozen to `false` as it is on stock
+Firefox Release. Zen ships `extensions.experiments.enabled = false` and
+`xpinstall.signatures.required = true` as defaults, so both have to be flipped —
+but on Zen, flipping them actually works.
+
+That points at a **hybrid**: BiDi for page-level work, where it is proven and
+excellent, and a small privileged extension for Space enumeration, Space
+membership, and Space-targeted tab creation. The cost is real: an unsigned
+privileged add-on, re-loaded on every restart unless signature enforcement is
+disabled, using an API Mozilla documents as unstable.
+
 ## Open questions still to test
 
 These need a **headed** run against a profile that has real Zen Spaces, which
 means restarting the user's daily Zen with `--remote-debugging-port`:
 
+- **Confirm §8 empirically**: with Personal visible, does
+  `browsingContext.getTree` really omit every Work tab?
 - Does a BiDi-created tab land in the Zen Space bound to its container, or in
-  whichever Space is currently visible? Zen assigns `zenWorkspace` in chrome
-  code that BiDi never calls, so this may simply not work.
-- Does `browsingContext.getTree` enumerate tabs belonging to **non-active**
-  Spaces? Zen hides those tabs, and hidden tabs may be invisible or may be
-  reported as discarded.
+  whichever Space is currently visible?
 - Does opening a background tab ever cause Zen to switch the visible Space?
 - Does a selected tab playing media keep playing, at the same position, across a
   full open/navigate/interact cycle in another tab?
