@@ -30,6 +30,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "spike:transport": "ZEN_SPIKE=1 vitest run test/integration",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
