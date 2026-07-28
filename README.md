@@ -59,3 +59,12 @@ agent
 
 The daemon will own discovery, stable tab identities, Personal/Work routing, and
 background-only navigation.
+
+## Contributing
+
+Issues and pull requests are welcome. Run `npm run check` before opening a pull
+request; CI runs the same command.
+
+## License
+
+[MIT](LICENSE).
