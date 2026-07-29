@@ -587,10 +587,15 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 
 ## 14. Packaging and release readiness
 
-- [ ] Decide whether to publish to npm, distribute a standalone binary, provide
-      a Homebrew formula, or use a combination.
+- [x] Decide whether to publish to npm, distribute a standalone binary, provide
+      a Homebrew formula, or use a combination. Homebrew is the only
+      package-manager release channel. It installs an offline-capable bundled
+      artifact from GitHub Releases; npm remains an internal build tool only.
+      Standalone binaries are deferred while the native host depends on Node.js.
+      See [distribution](../docs/distribution.md).
 - [x] Decide whether the CLI, daemon, and MCP entry point ship in one package.
-      The npm package contains all three executable entry points.
+      The bundled Homebrew release artifact contains all three executable entry
+      points.
 - [x] Bundle production code and verify the executable works outside the
       repository. A clean temporary install from the packed tarball passed CLI
       and sanitized MCP startup smoke tests.
@@ -598,7 +603,11 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
       requires one.
 - [ ] Package and sign the Zen/Firefox extension if one is required.
 - [ ] Add semantic versioning and changelog automation.
-- [ ] Add release CI, provenance, checksums, and an SBOM.
+- [ ] Add release CI, provenance, checksums, and an SBOM. A release-triggered
+      workflow now builds an offline-capable bundled Node tarball, unsigned XPI,
+      SPDX SBOM, checksums, provenance attestation, and Homebrew formula, then
+      uploads the assets. Keep this open until the first tagged release proves
+      the workflow with tag protection configured.
 - [ ] Add macOS code signing/notarization if distributing native executables.
 - [ ] Add an upgrade path for configuration and daemon protocol versions.
 - [ ] Run a clean-machine install, upgrade, rollback, and uninstall test.

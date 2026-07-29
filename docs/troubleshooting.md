@@ -84,25 +84,24 @@ Weak matches on stateful or sensitive URLs are conservative by design.
 
 ## Native-host installation refusal
 
-The installer never overwrites either target:
+The installer protects both targets:
 
 ```text
 ~/Library/Application Support/Zen Agent/zen-agent-host
 ~/Library/Application Support/Mozilla/NativeMessagingHosts/to.nodus.zen_agent.json
 ```
 
-Inspect an existing file before changing it. If both files were created by an
-older Zen Agent build, use the validating uninstaller, rebuild, and reinstall:
+If both files validate as Zen Agent-owned, `native-host install` safely
+refreshes the launcher's pinned Node and package paths during an upgrade:
 
 ```sh
-zen-agent native-host uninstall
-npm run build
-node dist/cli.js native-host install
+zen-agent native-host install
 ```
 
-Uninstall also refuses hand-edited, invalid, or foreign files and removes
-nothing partially. This is deliberate protection against deleting another
-application's Native Messaging setup.
+A partial installation or hand-edited, invalid, or foreign file is refused and
+left unchanged. Inspect it before taking any manual action. Uninstall applies
+the same ownership validation and removes nothing partially. This is deliberate
+protection against changing another application's Native Messaging setup.
 
 ## Configuration errors
 

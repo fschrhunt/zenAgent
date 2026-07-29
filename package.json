@@ -5,10 +5,25 @@
   "license": "MIT",
   "private": true,
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fschrhunt/zen-agent.git"
+  },
+  "homepage": "https://github.com/fschrhunt/zen-agent#readme",
+  "bugs": {
+    "url": "https://github.com/fschrhunt/zen-agent/issues"
+  },
+  "keywords": [
+    "zen-browser",
+    "browser-automation",
+    "cli",
+    "mcp",
+    "model-context-protocol"
+  ],
   "bin": {
-    "zen-agent": "./dist/cli.js",
-    "zen-agent-host": "./dist/native-host.js",
-    "zen-agent-mcp": "./dist/mcp.js"
+    "zen-agent": "dist/cli.js",
+    "zen-agent-host": "dist/native-host.js",
+    "zen-agent-mcp": "dist/mcp.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -22,17 +37,23 @@
     "dist",
     "extension"
   ],
+  "bundleDependencies": true,
   "engines": {
     "node": ">=24",
     "npm": ">=11"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build && npm run package:check && npm run release:check",
     "dev": "tsx src/cli.ts",
+    "extension:pack": "node scripts/package-extension.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "homebrew:formula": "node scripts/render-homebrew-formula.mjs",
     "lint": "eslint .",
+    "package:check": "node scripts/check-package.mjs",
+    "prepack": "npm run build",
+    "release:check": "node scripts/check-release-artifacts.mjs",
     "spike:transport": "ZEN_SPIKE=1 vitest run test/integration",
     "test": "vitest run",
     "test:watch": "vitest",

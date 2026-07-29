@@ -47,12 +47,13 @@ free. Zen permits this at all only because it ships
 `MOZ_REQUIRE_SIGNING: false`, which makes `AddonSettings.EXPERIMENTS_ENABLED` a
 live preference rather than frozen `false` as on stock Firefox Release.
 
-This source checkout does not yet include a release-quality extension installer
-or signed package. The headed harness creates an XPI from `extension/` and
-installs it only into a throwaway profile. A developer evaluating a real profile
-must package or temporarily load that directory themselves and must make the
-preference changes knowingly. Do not copy the integration harness's profile
-seeding procedure into a daily profile.
+This source checkout can package an unsigned XPI with `npm run extension:pack`,
+and the release workflow attaches that XPI to each GitHub release. It does not
+yet include a release-quality extension installer or signed package. The headed
+harness installs its XPI only into a throwaway profile. A developer evaluating a
+real profile must install the unsigned XPI or temporarily load `extension/` and
+must make the preference changes knowingly. Do not copy the integration
+harness's profile-seeding procedure into a daily profile.
 
 The native host manifest belongs at
 
@@ -85,14 +86,14 @@ Node and built host-module paths. The manifest is owner-readable (`0600`) and
 points to that launcher. Both are per-user files; installation needs no
 elevation.
 
-The installer preflights both destinations and uses exclusive file creation, so
-it never replaces an existing manifest or launcher. If either path already
-exists, inspect it instead of deleting it blindly. To upgrade a source checkout,
-uninstall the files owned by the previous build and install again after
-rebuilding:
+The installer preflights both destinations and uses exclusive file creation for
+a first install. On a later install it refreshes the launcher's pinned Node and
+host-module paths only when both existing files validate as Zen Agent-owned. A
+partial, invalid, hand-edited, or foreign installation is refused without
+changing either file. To upgrade a source checkout, rebuild and run the
+installer again:
 
 ```sh
-node dist/cli.js native-host uninstall
 npm run build
 node dist/cli.js native-host install
 ```
