@@ -106,6 +106,88 @@ describe("native host installer", () => {
     expect(existsSync(manifestPath(home))).toBe(false);
   });
 
+  it("refreshes a complete installation owned by Zen Agent", () => {
+    const { home, hostModulePath } = fixture();
+    const root = dirname(home);
+    const replacementHostModulePath = join(root, "replacement-native-host.js");
+    writeFileSync(replacementHostModulePath, "#!/usr/bin/env node\n");
+
+    const installed = installNativeHost({
+      home,
+      hostModulePath,
+      nodePath: process.execPath,
+      platform: "darwin",
+    });
+    const originalManifest = readFileSync(installed.manifestPath, "utf8");
+
+    const refreshed = installNativeHost({
+      home,
+      hostModulePath: replacementHostModulePath,
+      nodePath: "/bin/sh",
+      platform: "darwin",
+    });
+
+    expect(refreshed).toEqual({
+      manifestPath: installed.manifestPath,
+      launcherPath: installed.launcherPath,
+      hostModulePath: replacementHostModulePath,
+    });
+    expect(readFileSync(refreshed.launcherPath, "utf8")).toContain(
+      replacementHostModulePath,
+    );
+    expect(readFileSync(refreshed.launcherPath, "utf8")).toContain("/bin/sh");
+    expect(readFileSync(refreshed.launcherPath, "utf8")).not.toContain(
+      hostModulePath,
+    );
+    expect(readFileSync(refreshed.manifestPath, "utf8")).toBe(originalManifest);
+    expect(statSync(refreshed.launcherPath).mode & 0o777).toBe(0o700);
+  });
+
+  it("refuses to refresh a launcher that is not owned by Zen Agent", () => {
+    const { home, hostModulePath } = fixture();
+    const installed = installNativeHost({
+      home,
+      hostModulePath,
+      nodePath: process.execPath,
+      platform: "darwin",
+    });
+    writeFileSync(installed.launcherPath, "#!/bin/sh\nforeign\n");
+
+    expect(() =>
+      installNativeHost({
+        home,
+        hostModulePath,
+        nodePath: process.execPath,
+        platform: "darwin",
+      }),
+    ).toThrow(/Refusing to overwrite/);
+    expect(readFileSync(installed.launcherPath, "utf8")).toBe(
+      "#!/bin/sh\nforeign\n",
+    );
+  });
+
+  it("preserves a colliding replacement file during refresh", () => {
+    const { home, hostModulePath } = fixture();
+    const installed = installNativeHost({
+      home,
+      hostModulePath,
+      nodePath: process.execPath,
+      platform: "darwin",
+    });
+    const replacementPath = `${installed.launcherPath}.${String(process.pid)}.tmp`;
+    writeFileSync(replacementPath, "foreign");
+
+    expect(() =>
+      installNativeHost({
+        home,
+        hostModulePath,
+        nodePath: process.execPath,
+        platform: "darwin",
+      }),
+    ).toThrow();
+    expect(readFileSync(replacementPath, "utf8")).toBe("foreign");
+  });
+
   it("uninstalls only the launcher and manifest it owns", () => {
     const { home, hostModulePath } = fixture();
     const installed = installNativeHost({

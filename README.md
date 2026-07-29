@@ -15,6 +15,37 @@ over the window you are actively working in.
 
 <br />
 
+## Install
+
+The supported release channels and download paths are:
+
+| Channel                | Download path                                                             | Command                                        |
+| ---------------------- | ------------------------------------------------------------------------- | ---------------------------------------------- |
+| Homebrew               | [`fschrhunt/tap`](https://github.com/fschrhunt/homebrew-tap)              | `brew install fschrhunt/tap/zen-agent`         |
+| Release assets         | [GitHub Releases](https://github.com/fschrhunt/zen-agent/releases/latest) | bundled tarball, unsigned XPI, SBOM, checksums |
+| Source available today | [GitHub](https://github.com/fschrhunt/zen-agent)                          | See below                                      |
+
+Until a version appears in GitHub Releases and the Homebrew tap, install from
+source:
+
+```sh
+git clone https://github.com/fschrhunt/zen-agent.git
+cd zen-agent
+npm ci
+npm run build
+node dist/cli.js native-host install
+```
+
+Zen Agent also needs its privileged extension in the intended Zen profile. Until
+the first release provides the unsigned XPI, follow the explicit preference and
+source-extension steps in the [transport guide](docs/transport.md#requirements).
+The extension never changes profiles or browser preferences automatically.
+
+Homebrew is the only package-manager release channel. npm is used internally to
+build and test the Node.js project, but Zen Agent is not published to the npm
+registry and Homebrew installation runs offline from the bundled GitHub release
+artifact.
+
 ## Why
 
 Agents that drive a browser usually steal it. They raise a window, jump you to a
@@ -83,10 +114,11 @@ Register the native messaging host for the current macOS user after building:
 node dist/cli.js native-host install
 ```
 
-This creates an owner-only launcher under
+This creates or safely refreshes an owner-only launcher under
 `~/Library/Application Support/Zen Agent/` and the Firefox-compatible manifest
-under `~/Library/Application Support/Mozilla/NativeMessagingHosts/`. It refuses
-to overwrite either target. Remove only files created by this installer with:
+under `~/Library/Application Support/Mozilla/NativeMessagingHosts/`. Existing
+files are changed only when both validate as Zen Agent-owned. Remove only files
+created by this installer with:
 
 ```sh
 node dist/cli.js native-host uninstall

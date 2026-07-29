@@ -4,7 +4,8 @@
  * Firefox needs an absolute executable path in its manifest. TypeScript emits
  * `native-host.js` as a non-executable module, so the installer creates a small
  * owner-only launcher that invokes the current Node executable with that
- * module. Nothing is installed system-wide and no target is ever overwritten.
+ * module. Nothing is installed system-wide, and upgrades replace only a
+ * launcher whose complete installation validates as Zen Agent-owned.
  */
 
 import {
@@ -13,6 +14,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -116,8 +118,15 @@ function refusal(path: string): Error {
   );
 }
 
+function isOwnedLauncher(path: string): boolean {
+  return readFileSync(path, "utf8").startsWith(
+    `#!/bin/sh\n${LAUNCHER_MARKER}\n`,
+  );
+}
+
 /**
- * Install the launcher and Firefox manifest without overwriting either target.
+ * Install a new launcher and manifest, or refresh a complete installation that
+ * both files prove Zen Agent owns.
  */
 export function installNativeHost(
   options: NativeHostInstallOptions = {},
@@ -134,10 +143,59 @@ export function installNativeHost(
   requireAbsoluteFile(hostModulePath, "Native host module");
   requireExecutableFile(nodePath, "Node executable");
 
-  for (const target of [launcherPath, destinationManifestPath]) {
-    if (existsSync(target)) {
-      throw refusal(target);
+  const hasLauncher = existsSync(launcherPath);
+  const hasManifest = existsSync(destinationManifestPath);
+
+  if (hasLauncher || hasManifest) {
+    if (!hasLauncher || !hasManifest) {
+      throw refusal(hasLauncher ? launcherPath : destinationManifestPath);
     }
+
+    if (!isOwnedLauncher(launcherPath)) {
+      throw refusal(launcherPath);
+    }
+
+    let parsedManifest: unknown;
+
+    try {
+      parsedManifest = JSON.parse(
+        readFileSync(destinationManifestPath, "utf8"),
+      );
+    } catch {
+      throw refusal(destinationManifestPath);
+    }
+
+    if (!isOwnedManifest(parsedManifest, launcherPath)) {
+      throw refusal(destinationManifestPath);
+    }
+
+    const replacementPath = `${launcherPath}.${String(process.pid)}.tmp`;
+    let replacementCreated = false;
+
+    try {
+      writeFileSync(
+        replacementPath,
+        launcherContents(nodePath, hostModulePath),
+        {
+          encoding: "utf8",
+          flag: "wx",
+          mode: 0o700,
+        },
+      );
+      replacementCreated = true;
+      renameSync(replacementPath, launcherPath);
+    } catch (error) {
+      if (replacementCreated) {
+        rmSync(replacementPath, { force: true });
+      }
+      throw error;
+    }
+
+    return {
+      manifestPath: destinationManifestPath,
+      launcherPath,
+      hostModulePath,
+    };
   }
 
   mkdirSync(nativeHostInstallDirectory(home), {
@@ -229,12 +287,7 @@ export function uninstallNativeHost(
     };
   }
 
-  if (
-    hasLauncher &&
-    !readFileSync(launcherPath, "utf8").startsWith(
-      `#!/bin/sh\n${LAUNCHER_MARKER}\n`,
-    )
-  ) {
+  if (hasLauncher && !isOwnedLauncher(launcherPath)) {
     throw new Error(
       `Refusing to remove a launcher not owned by Zen Agent: ${launcherPath}`,
     );
