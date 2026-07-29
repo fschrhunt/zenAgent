@@ -1,5 +1,5 @@
 /**
- * Versioned protocol between local CLI/MCP clients and the shared daemon.
+ * Versioned protocol between local setup/MCP clients and the shared daemon.
  *
  * The daemon protocol is deliberately independent from the extension protocol:
  * clients and the native host can be upgraded independently, and neither side

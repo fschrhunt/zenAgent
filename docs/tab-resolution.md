@@ -2,8 +2,8 @@
 
 The shared policy in `src/resolution/` discovers tabs before opening one and
 never relies on the browser's selected tab. It is independent of the native
-transport so the daemon can inject a registry-backed adapter and the CLI and MCP
-server can use the same result contract.
+transport so the daemon can inject a registry-backed adapter and the MCP server
+can use the same result contract.
 
 ## Matching
 

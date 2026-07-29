@@ -1,14 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 import type {
-  BrowsingContextId,
   BrowserSpace,
   BrowserSpaceId,
-  BrowserTab,
-  BrowserTabId,
-  MediaState,
   Observation,
-  TabLoadState,
 } from "../browser/model.js";
 import { mapDiscoveredSpaces, SpaceMappingError } from "../config/discovery.js";
 import { configPath } from "../config/path.js";
@@ -27,8 +23,10 @@ import {
 } from "../daemon/protocol.js";
 import { ZEN_AGENT_VERSION } from "../index.js";
 import {
+  inspectNativeHostInstallation,
   installNativeHost,
   uninstallNativeHost,
+  type NativeHostInstallation,
   type NativeHostInstallOptions,
   type NativeHostInstallResult,
   type NativeHostUninstallResult,
@@ -38,8 +36,13 @@ import {
   EntityReferenceError,
   formatEntityReference,
   parseSpaceReference,
-  parseTabReference,
 } from "./entity-reference.js";
+import { runSetupWizard, type SetupWizardServices } from "./wizard.js";
+import { createTerminalWizardUi } from "./wizard-ui.js";
+
+const EXTENSION_MANIFEST_PATH = fileURLToPath(
+  new URL("../../extension/manifest.json", import.meta.url),
+);
 
 export const CLI_EXIT_CODES = {
   success: 0,
@@ -55,20 +58,16 @@ export const CLI_EXIT_CODES = {
 
 const HELP = `zen-agent ${ZEN_AGENT_VERSION}
 
-A considerate, space-aware browser CLI for agents.
+Setup and maintenance for Zen Agent.
 
 Usage:
+  zen-agent
   zen-agent <command> [options]
 
 Commands:
-  status                Report daemon and browser health
+  setup                 Open the interactive setup wizard
+  status                Report sanitized daemon and browser health
   spaces list           List discovered Spaces without selecting them
-  tabs list             List discovered tabs
-  tabs resolve          Reuse or open a suitable background tab
-  tabs open             Reuse or open a URL in the background
-  tabs navigate         Navigate an explicit stable tab ID in the background
-  tabs reload           Reload an explicit stable tab ID in the background
-  tabs close            Close an explicit stable tab ID
   config map            Map discovered Space IDs in the local configuration
   native-host install   Register the per-user native messaging host
   native-host uninstall Remove files created by the native-host installer
@@ -80,8 +79,10 @@ Global options:
   -h, --help         Show help
   -v, --version      Print the version
 
-All browser operations go through the shared local daemon. No command focuses
-Zen, selects a tab, or switches the visible Space.
+Running zen-agent in an interactive terminal opens the setup wizard.
+Agents and scripts should use explicit commands and --json where supported.
+Browser automation is exposed through the MCP server, not this setup utility.
+No command focuses Zen, selects a tab, or switches the visible Space.
 `;
 
 const STATUS_HELP = `Usage:
@@ -96,26 +97,6 @@ const SPACES_HELP = `Usage:
 
 Side effects:
   None. Discovers Spaces without selecting one or changing visible browser state.
-`;
-
-const TABS_HELP = `Usage:
-  zen-agent tabs list [--space <opaque-space-id>] [--json]
-  zen-agent tabs resolve <url-or-query> [--space <id-or-alias>]
-                         [--task-context <name>] [--explain] [--json]
-  zen-agent tabs open <url> [--space <id-or-alias>]
-                      [--task-context <name>] [--explain] [--json]
-  zen-agent tabs navigate <opaque-tab-id> <url> [--json]
-  zen-agent tabs reload <opaque-tab-id> [--json]
-  zen-agent tabs close <opaque-tab-id> [--json]
-
-Side effects:
-  list reads current state only.
-  resolve and open may create one background tab after discovery and safe reuse.
-  navigate changes only the explicitly identified background tab.
-  reload reloads only the explicitly identified background tab.
-  close closes only the explicitly identified tab.
-
-There is intentionally no foreground option.
 `;
 
 const CONFIG_HELP = `Usage:
@@ -152,6 +133,7 @@ interface CliDaemonClient {
 }
 
 export interface CliDependencies {
+  readonly inspectNativeHost: () => NativeHostInstallation;
   readonly installNativeHost: (
     options?: NativeHostInstallOptions,
   ) => NativeHostInstallResult;
@@ -162,6 +144,8 @@ export interface CliDependencies {
   readonly readConfig: (path: string) => Promise<ZenAgentConfig | undefined>;
   readonly writeConfig: (path: string, config: ZenAgentConfig) => Promise<void>;
   readonly configPath: () => string;
+  readonly isInteractive: () => boolean;
+  readonly startSetupWizard: (services: SetupWizardServices) => Promise<void>;
 }
 
 interface ParsedArguments {
@@ -181,6 +165,8 @@ function defaultDependencies(
   overrides: Partial<CliDependencies>,
 ): CliDependencies {
   return {
+    inspectNativeHost:
+      overrides.inspectNativeHost ?? inspectNativeHostInstallation,
     installNativeHost: overrides.installNativeHost ?? installNativeHost,
     uninstallNativeHost: overrides.uninstallNativeHost ?? uninstallNativeHost,
     createDaemonClient:
@@ -192,6 +178,18 @@ function defaultDependencies(
     readConfig: overrides.readConfig ?? readOptionalConfig,
     writeConfig: overrides.writeConfig ?? writeConfig,
     configPath: overrides.configPath ?? configPath,
+    isInteractive:
+      overrides.isInteractive ??
+      (() => process.stdin.isTTY === true && process.stdout.isTTY === true),
+    startSetupWizard:
+      overrides.startSetupWizard ??
+      ((services) =>
+        runSetupWizard({
+          version: ZEN_AGENT_VERSION,
+          extensionManifestPath: EXTENSION_MANIFEST_PATH,
+          services,
+          ui: createTerminalWizardUi(),
+        })),
   };
 }
 
@@ -318,10 +316,6 @@ function isSpaceId(value: unknown): value is BrowserSpaceId {
   return isSessionScopedId(value, "space");
 }
 
-function isTabId(value: unknown): value is BrowserTabId {
-  return isSessionScopedId(value, "tab");
-}
-
 function isSpace(value: unknown): value is BrowserSpace {
   return (
     isRecord(value) &&
@@ -341,65 +335,6 @@ function isSpace(value: unknown): value is BrowserSpace {
       (candidate): candidate is string | null =>
         candidate === null || typeof candidate === "string",
     )
-  );
-}
-
-function isTab(value: unknown): value is BrowserTab {
-  return (
-    isRecord(value) &&
-    value["kind"] === "tab" &&
-    isTabId(value["id"]) &&
-    isSessionScopedId(value["windowId"], "window") &&
-    isObservation(
-      value["spaceId"],
-      (candidate): candidate is BrowserSpaceId | null =>
-        candidate === null || isSpaceId(candidate),
-    ) &&
-    isObservation(
-      value["browsingContextId"],
-      (candidate): candidate is BrowsingContextId | null =>
-        candidate === null || isSessionScopedId(candidate, "browsing-context"),
-    ) &&
-    isObservation(
-      value["url"],
-      (candidate): candidate is string => typeof candidate === "string",
-    ) &&
-    isObservation(
-      value["title"],
-      (candidate): candidate is string => typeof candidate === "string",
-    ) &&
-    isObservation(
-      value["loadState"],
-      (candidate): candidate is TabLoadState =>
-        candidate === "unloaded" ||
-        candidate === "loading" ||
-        candidate === "interactive" ||
-        candidate === "complete",
-    ) &&
-    isObservation(
-      value["selected"],
-      (candidate): candidate is boolean => typeof candidate === "boolean",
-    ) &&
-    isObservation(
-      value["mediaState"],
-      (candidate): candidate is MediaState =>
-        candidate === "none" ||
-        candidate === "playing" ||
-        candidate === "paused" ||
-        candidate === "picture-in-picture",
-    ) &&
-    isObservation(
-      value["containerId"],
-      (candidate): candidate is string | null =>
-        candidate === null || typeof candidate === "string",
-    ) &&
-    isObservation(
-      value["private"],
-      (candidate): candidate is boolean => typeof candidate === "boolean",
-    ) &&
-    (value["lifecycleState"] === "open" ||
-      value["lifecycleState"] === "discarded" ||
-      value["lifecycleState"] === "crashed")
   );
 }
 
@@ -579,10 +514,7 @@ async function runStatus(
   const parsed = parseArguments(args, new Set(["--json"]), new Set());
   requirePositionals(parsed, 0, "Usage: zen-agent status [--json]");
   const json = parsed.flags.has("--json");
-  const profile = await configuredProfile(dependencies);
-  const result = await withDaemon(profile, dependencies, (client) =>
-    client.request("status"),
-  );
+  const result = await readStatus(dependencies);
 
   writeResult("status", result, json, () => {
     if (!isRecord(result)) {
@@ -603,6 +535,13 @@ async function runStatus(
     ].join("\n");
   });
   return CLI_EXIT_CODES.success;
+}
+
+async function readStatus(dependencies: CliDependencies): Promise<unknown> {
+  const profile = await configuredProfile(dependencies);
+  return withDaemon(profile, dependencies, (client) =>
+    client.request("status"),
+  );
 }
 
 async function readSpaces(
@@ -662,37 +601,6 @@ async function runSpaces(
   return CLI_EXIT_CODES.success;
 }
 
-async function readTabs(
-  client: CliDaemonClient,
-): Promise<readonly BrowserTab[]> {
-  const result = await client.request("registry.entities", { kind: "tab" });
-  const tabs = entitiesResult(result);
-
-  if (!tabs.every(isTab)) {
-    throw new Error("The daemon returned a malformed tab.");
-  }
-
-  return tabs;
-}
-
-async function requireActiveSpace(
-  client: CliDaemonClient,
-  spaceId: BrowserSpaceId,
-): Promise<void> {
-  const result = await client.request("registry.lookup", { id: spaceId });
-
-  if (
-    !isRecord(result) ||
-    !isRecord(result["lookup"]) ||
-    result["lookup"]["status"] !== "active"
-  ) {
-    throw new DaemonProtocolError(
-      "stale-id",
-      "The requested Space ID is not active in the current Zen session.",
-    );
-  }
-}
-
 function sameId(left: BrowserSpaceId, right: BrowserSpaceId): boolean {
   return (
     left.transportId === right.transportId &&
@@ -700,248 +608,6 @@ function sameId(left: BrowserSpaceId, right: BrowserSpaceId): boolean {
     left.sessionId.profileId.transportId ===
       right.sessionId.profileId.transportId
   );
-}
-
-function publicTab(tab: BrowserTab): Readonly<Record<string, unknown>> {
-  return {
-    id: formatEntityReference(tab.id),
-    transportId: tab.id.transportId,
-    spaceId:
-      tab.spaceId.status === "known" && tab.spaceId.value !== null
-        ? formatEntityReference(tab.spaceId.value)
-        : tab.spaceId,
-    url: tab.url,
-    title: tab.title,
-    loadState: tab.loadState,
-    lifecycleState: tab.lifecycleState,
-  };
-}
-
-async function runTabsList(
-  args: readonly string[],
-  dependencies: CliDependencies,
-): Promise<CliExitCode> {
-  const parsed = parseArguments(
-    args,
-    new Set(["--json"]),
-    new Set(["--space"]),
-  );
-  requirePositionals(
-    parsed,
-    0,
-    "Usage: zen-agent tabs list [--space <opaque-space-id>] [--json]",
-  );
-  const json = parsed.flags.has("--json");
-  const requestedSpace =
-    option(parsed, "--space") === undefined
-      ? undefined
-      : parseSpaceReference(option(parsed, "--space") ?? "");
-  const profile = await configuredProfile(dependencies);
-  const allTabs = await withDaemon(profile, dependencies, async (client) => {
-    if (requestedSpace !== undefined) {
-      await requireActiveSpace(client, requestedSpace);
-    }
-
-    return readTabs(client);
-  });
-  const tabs =
-    requestedSpace === undefined
-      ? allTabs
-      : allTabs.filter(
-          (tab) =>
-            tab.spaceId.status === "known" &&
-            tab.spaceId.value !== null &&
-            sameId(tab.spaceId.value, requestedSpace),
-        );
-  const publicTabs = tabs.map(publicTab);
-
-  writeResult("tabs.list", publicTabs, json, () => {
-    if (tabs.length === 0) {
-      return "No matching tabs discovered.\n";
-    }
-
-    return `${tabs
-      .map(
-        (tab) =>
-          `${formatEntityReference(tab.id)}\t${printableObservation(tab.title, String)}\t${printableObservation(tab.url, String)}`,
-      )
-      .join("\n")}\n`;
-  });
-  return CLI_EXIT_CODES.success;
-}
-
-function routingSpace(
-  value: string | undefined,
-): string | BrowserSpaceId | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  return value.startsWith("zen:") ? parseSpaceReference(value) : value;
-}
-
-async function runTabsResolve(
-  action: "resolve" | "open",
-  args: readonly string[],
-  dependencies: CliDependencies,
-): Promise<CliExitCode> {
-  const parsed = parseArguments(
-    args,
-    new Set(["--json", "--explain"]),
-    new Set(["--space", "--task-context"]),
-  );
-  requirePositionals(
-    parsed,
-    1,
-    action === "open"
-      ? "Usage: zen-agent tabs open <url> [--space <id-or-alias>] [--task-context <name>] [--explain] [--json]"
-      : "Usage: zen-agent tabs resolve <url-or-query> [--space <id-or-alias>] [--task-context <name>] [--explain] [--json]",
-  );
-  const input = parsed.positionals[0];
-
-  if (input === undefined) {
-    throw new CliInputError("A URL or query is required.");
-  }
-
-  let absoluteUrl: string | undefined;
-
-  try {
-    const parsedUrl = new URL(input);
-
-    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-      throw new CliInputError("Tab URLs must use the HTTP or HTTPS scheme.");
-    }
-
-    absoluteUrl = parsedUrl.href;
-  } catch (error) {
-    if (error instanceof CliInputError) {
-      throw error;
-    }
-
-    if (action === "open") {
-      throw new CliInputError("tabs open requires an absolute HTTP(S) URL.");
-    }
-  }
-
-  const json = parsed.flags.has("--json");
-  const profile = await configuredProfile(dependencies);
-  const requestedSpace = routingSpace(option(parsed, "--space"));
-  const result = await withDaemon(profile, dependencies, (client) =>
-    client.request(
-      "tabs.resolve",
-      {
-        ...(absoluteUrl === undefined
-          ? { query: input }
-          : { url: absoluteUrl }),
-        ...(requestedSpace === undefined
-          ? {}
-          : typeof requestedSpace === "string"
-            ? { space: requestedSpace }
-            : { spaceId: requestedSpace }),
-        ...(option(parsed, "--task-context") === undefined
-          ? {}
-          : { taskContext: option(parsed, "--task-context") }),
-      },
-      `cli:${action}:${randomUUID()}`,
-    ),
-  );
-
-  writeResult(`tabs.${action}`, result, json, () => {
-    if (!isRecord(result)) {
-      throw new Error("The daemon returned a malformed tab resolution.");
-    }
-
-    const status = scalarText(
-      result["status"],
-      scalarText(result["outcome"], "resolved"),
-    );
-    const tabId = isTabId(result["tabId"])
-      ? formatEntityReference(result["tabId"])
-      : "none";
-    const explanation =
-      parsed.flags.has("--explain") && result["explanation"] !== undefined
-        ? `\n${JSON.stringify(result["explanation"], null, 2)}`
-        : "";
-    return `${status}: ${tabId}${explanation}\n`;
-  });
-
-  if (
-    isRecord(result) &&
-    (result["status"] === "ambiguous" || result["outcome"] === "ambiguous")
-  ) {
-    return CLI_EXIT_CODES.ambiguity;
-  }
-
-  if (isRecord(result) && result["status"] === "not-found") {
-    return CLI_EXIT_CODES.policyRejection;
-  }
-
-  return CLI_EXIT_CODES.success;
-}
-
-async function runTabMutation(
-  action: "navigate" | "reload" | "close",
-  args: readonly string[],
-  dependencies: CliDependencies,
-): Promise<CliExitCode> {
-  const parsed = parseArguments(args, new Set(["--json"]), new Set());
-  const expected = action === "navigate" ? 2 : 1;
-  requirePositionals(
-    parsed,
-    expected,
-    action === "navigate"
-      ? "Usage: zen-agent tabs navigate <opaque-tab-id> <url> [--json]"
-      : `Usage: zen-agent tabs ${action} <opaque-tab-id> [--json]`,
-  );
-  const reference = parsed.positionals[0];
-
-  if (reference === undefined) {
-    throw new CliInputError("An explicit stable tab ID is required.");
-  }
-
-  const tabId = parseTabReference(reference);
-  let navigationUrl: string | undefined;
-
-  if (action === "navigate") {
-    const value = parsed.positionals[1];
-
-    if (value === undefined) {
-      throw new CliInputError("An absolute HTTP(S) URL is required.");
-    }
-
-    try {
-      const parsedUrl = new URL(value);
-
-      if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-        throw new CliInputError("Tab URLs must use the HTTP or HTTPS scheme.");
-      }
-
-      navigationUrl = parsedUrl.href;
-    } catch (error) {
-      if (error instanceof CliInputError) {
-        throw error;
-      }
-
-      throw new CliInputError("An absolute HTTP(S) URL is required.");
-    }
-  }
-
-  const params =
-    action === "navigate" ? { tabId, url: navigationUrl } : { tabId };
-  const json = parsed.flags.has("--json");
-  const profile = await configuredProfile(dependencies);
-  const result = await withDaemon(profile, dependencies, (client) =>
-    client.request(`tabs.${action}`, params, `cli:${action}:${randomUUID()}`),
-  );
-
-  writeResult(`tabs.${action}`, result, json, () => {
-    const outcome =
-      isRecord(result) && typeof result["outcome"] === "string"
-        ? result["outcome"]
-        : action;
-    return `${outcome}: ${reference}\n`;
-  });
-  return CLI_EXIT_CODES.success;
 }
 
 function parseAlias(value: string): readonly [string, string] {
@@ -954,6 +620,94 @@ function parseAlias(value: string): readonly [string, string] {
   }
 
   return [value.slice(0, separator), value.slice(separator + 1)];
+}
+
+interface ConfigMappingUpdate {
+  readonly destination: string;
+  readonly existing: ZenAgentConfig | undefined;
+  readonly requestedProfile: string | undefined;
+  readonly personalReference: BrowserSpaceId | undefined;
+  readonly workReference: BrowserSpaceId | undefined;
+  readonly aliases: Readonly<Record<string, string>>;
+  readonly requestedReferences: readonly BrowserSpaceId[];
+}
+
+interface ConfigMappingUpdateResult {
+  readonly path: string;
+  readonly profile: string;
+  readonly spaces: ZenAgentConfig["spaces"];
+}
+
+async function applyConfigMapping(
+  update: ConfigMappingUpdate,
+  dependencies: CliDependencies,
+): Promise<ConfigMappingUpdateResult> {
+  const defaultConfigPath = dependencies.configPath();
+  const personal =
+    update.personalReference?.transportId ?? update.existing?.spaces.personal;
+  const work =
+    update.workReference?.transportId ?? update.existing?.spaces.work;
+  const discoveredResult = await withDaemon(
+    update.requestedProfile,
+    dependencies,
+    async (client) => {
+      const [spaces, status] = await Promise.all([
+        readSpaces(client),
+        client.request("status"),
+      ]);
+      return { spaces, status };
+    },
+  );
+  const statusProfile =
+    isRecord(discoveredResult.status) &&
+    typeof discoveredResult.status["profileId"] === "string"
+      ? discoveredResult.status["profileId"]
+      : undefined;
+  const profile = update.requestedProfile ?? statusProfile;
+
+  if (profile === undefined) {
+    throw new CliInputError(
+      "The connected daemon did not report a profile; pass --profile explicitly.",
+    );
+  }
+
+  for (const reference of update.requestedReferences) {
+    if (!discoveredResult.spaces.some((space) => sameId(space.id, reference))) {
+      throw new SpaceMappingError(
+        "A requested Space ID is stale or was not returned by current discovery.",
+      );
+    }
+  }
+
+  const mappings = mapDiscoveredSpaces(
+    discoveredResult.spaces.map((space) => {
+      const name = knownValue(space.name);
+      return {
+        id: space.id.transportId,
+        ...(name === undefined ? {} : { name }),
+      };
+    }),
+    {
+      ...(personal === undefined ? {} : { personal }),
+      ...(work === undefined ? {} : { work }),
+      aliases: update.aliases,
+    },
+  );
+  const config = parseConfig({
+    version: CONFIG_SCHEMA_VERSION,
+    profile,
+    spaces: mappings,
+    routing: update.existing?.routing ?? { rules: [] },
+  });
+  await dependencies.writeConfig(update.destination, config);
+
+  if (update.destination === defaultConfigPath) {
+    await withDaemon(profile, dependencies, (client) =>
+      client.request("config.reload", {}, `cli:config-reload:${randomUUID()}`),
+    );
+  }
+
+  return { path: update.destination, profile, spaces: mappings };
 }
 
 async function runConfigMap(
@@ -997,78 +751,27 @@ async function runConfigMap(
     requestedReferences.push(workReference);
   }
 
-  const personal = personalReference?.transportId ?? existing?.spaces.personal;
-  const work = workReference?.transportId ?? existing?.spaces.work;
-  const discoveredResult = await withDaemon(
-    socketProfile,
-    dependencies,
-    async (client) => {
-      const [spaces, status] = await Promise.all([
-        readSpaces(client),
-        client.request("status"),
-      ]);
-      return { spaces, status };
-    },
-  );
-  const statusProfile =
-    isRecord(discoveredResult.status) &&
-    typeof discoveredResult.status["profileId"] === "string"
-      ? discoveredResult.status["profileId"]
-      : undefined;
-  const profile = requestedProfile ?? statusProfile;
-
-  if (profile === undefined) {
-    throw new CliInputError(
-      "The connected daemon did not report a profile; pass --profile explicitly.",
-    );
-  }
-
-  for (const reference of requestedReferences) {
-    if (!discoveredResult.spaces.some((space) => sameId(space.id, reference))) {
-      throw new SpaceMappingError(
-        "A requested Space ID is stale or was not returned by current discovery.",
-      );
-    }
-  }
-
-  const mappings = mapDiscoveredSpaces(
-    discoveredResult.spaces.map((space) => {
-      const name = knownValue(space.name);
-      return {
-        id: space.id.transportId,
-        ...(name === undefined ? {} : { name }),
-      };
-    }),
+  const result = await applyConfigMapping(
     {
-      ...(personal === undefined ? {} : { personal }),
-      ...(work === undefined ? {} : { work }),
+      destination,
+      existing,
+      requestedProfile: socketProfile,
+      personalReference,
+      workReference,
       aliases,
+      requestedReferences,
     },
+    dependencies,
   );
-  const config = parseConfig({
-    version: CONFIG_SCHEMA_VERSION,
-    profile,
-    spaces: mappings,
-    routing: existing?.routing ?? { rules: [] },
-  });
-  await dependencies.writeConfig(destination, config);
-
-  if (destination === defaultConfigPath) {
-    await withDaemon(profile, dependencies, (client) =>
-      client.request("config.reload", {}, `cli:config-reload:${randomUUID()}`),
-    );
-  }
-
-  const result = { path: destination, profile, spaces: mappings };
   const json = parsed.flags.has("--json");
 
   writeResult("config.map", result, json, () => {
     return [
       `Updated ${destination}`,
-      `Profile: ${profile}`,
-      `Personal: ${mappings.personal ?? "unmapped"}`,
-      `Work: ${mappings.work ?? "unmapped"}`,
-      `Aliases: ${String(Object.keys(mappings.aliases).length)}`,
+      `Profile: ${result.profile}`,
+      `Personal: ${result.spaces.personal ?? "unmapped"}`,
+      `Work: ${result.spaces.work ?? "unmapped"}`,
+      `Aliases: ${String(Object.keys(result.spaces.aliases).length)}`,
       "",
     ].join("\n");
   });
@@ -1126,18 +829,80 @@ function runNativeHostCommand(
   );
 }
 
+function statusForWizard(value: unknown): {
+  readonly state: string;
+  readonly profileId: string | null;
+  readonly spaces: number;
+  readonly tabs: number;
+} {
+  if (!isRecord(value)) {
+    throw new Error("The daemon returned a malformed status result.");
+  }
+
+  const counts = isRecord(value["counts"]) ? value["counts"] : {};
+  return {
+    state: scalarText(value["state"], "unknown"),
+    profileId:
+      typeof value["profileId"] === "string" ? value["profileId"] : null,
+    spaces: typeof counts["spaces"] === "number" ? counts["spaces"] : 0,
+    tabs: typeof counts["tabs"] === "number" ? counts["tabs"] : 0,
+  };
+}
+
+function wizardServices(dependencies: CliDependencies): SetupWizardServices {
+  return {
+    inspectNativeHost: dependencies.inspectNativeHost,
+    installNativeHost: () => dependencies.installNativeHost(),
+    uninstallNativeHost: dependencies.uninstallNativeHost,
+    status: async () => statusForWizard(await readStatus(dependencies)),
+    spaces: async () => {
+      const profile = await configuredProfile(dependencies);
+      const spaces = await withDaemon(profile, dependencies, readSpaces);
+      return spaces.map((space, index) => ({
+        id: space.id,
+        name: knownValue(space.name) ?? `Unnamed Space ${String(index + 1)}`,
+      }));
+    },
+    readConfig: () => dependencies.readConfig(dependencies.configPath()),
+    mapSpaces: async (selection) => {
+      const destination = dependencies.configPath();
+      const existing = await dependencies.readConfig(destination);
+      const requestedReferences = [selection.personal, selection.work].filter(
+        (reference) => reference !== undefined,
+      );
+      const result = await applyConfigMapping(
+        {
+          destination,
+          existing,
+          requestedProfile: existing?.profile,
+          personalReference: selection.personal,
+          workReference: selection.work,
+          aliases: { ...(existing?.spaces.aliases ?? {}) },
+          requestedReferences,
+        },
+        dependencies,
+      );
+      return { path: result.path, profile: result.profile };
+    },
+  };
+}
+
 async function dispatch(
   args: readonly string[],
   dependencies: CliDependencies,
 ): Promise<CliExitCode> {
   const [command, ...rest] = args;
 
-  if (
-    command === undefined ||
-    command === "help" ||
-    command === "-h" ||
-    command === "--help"
-  ) {
+  if (command === undefined) {
+    if (dependencies.isInteractive()) {
+      await dependencies.startSetupWizard(wizardServices(dependencies));
+    } else {
+      process.stdout.write(HELP);
+    }
+    return CLI_EXIT_CODES.success;
+  }
+
+  if (command === "help" || command === "-h" || command === "--help") {
     process.stdout.write(HELP);
     return CLI_EXIT_CODES.success;
   }
@@ -1148,34 +913,21 @@ async function dispatch(
   }
 
   switch (command) {
+    case "setup":
+      if (rest.length > 0) {
+        throw new CliInputError("Usage: zen-agent setup");
+      }
+      if (!dependencies.isInteractive()) {
+        throw new CliInputError(
+          "zen-agent setup requires an interactive terminal. Agents and scripts should use explicit commands and --json where supported.",
+        );
+      }
+      await dependencies.startSetupWizard(wizardServices(dependencies));
+      return CLI_EXIT_CODES.success;
     case "status":
       return runStatus(rest, dependencies);
     case "spaces":
       return runSpaces(rest, dependencies);
-    case "tabs": {
-      const [action, ...options] = rest;
-
-      if (action === undefined || action === "help" || action === "--help") {
-        process.stdout.write(TABS_HELP);
-        return CLI_EXIT_CODES.success;
-      }
-
-      switch (action) {
-        case "list":
-          return runTabsList(options, dependencies);
-        case "resolve":
-        case "open":
-          return runTabsResolve(action, options, dependencies);
-        case "navigate":
-        case "reload":
-        case "close":
-          return runTabMutation(action, options, dependencies);
-        default:
-          throw new CliInputError(
-            `Unknown tabs command: ${action}\n\n${TABS_HELP}`,
-          );
-      }
-    }
     case "config": {
       const [action, ...options] = rest;
 

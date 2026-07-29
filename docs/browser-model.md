@@ -3,7 +3,7 @@
 The Zen Agent browser model is a normalized, versioned description of every
 profile, browser session, window, Space, tab, browsing context, frame, and
 short-lived element that the transport reports. It is the contract shared by the
-transport, daemon, CLI, and MCP server.
+transport, daemon, setup CLI, and MCP server.
 
 ## Identity
 

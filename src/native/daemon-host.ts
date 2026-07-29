@@ -3,7 +3,7 @@
  *
  * Zen starts this process by opening the Native Messaging port. The process
  * owns that one browser transport and publishes the daemon's per-profile Unix
- * socket for CLI and MCP clients. A second standalone daemon would have no
+ * socket for setup CLI and MCP clients. A second standalone daemon would have no
  * Native Messaging connection and would violate the one-transport invariant.
  */
 

@@ -1,9 +1,9 @@
-import type { BrowserSpaceId, BrowserTabId } from "../browser/model.js";
+import type { BrowserSpaceId } from "../browser/model.js";
 
 const REFERENCE_PREFIX = "zen:";
 
 interface SerializedEntityReference {
-  readonly kind: "space" | "tab";
+  readonly kind: "space";
   readonly profile: string;
   readonly session: string;
   readonly id: string;
@@ -23,7 +23,7 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 function decodeReference(reference: string): SerializedEntityReference {
   if (!reference.startsWith(REFERENCE_PREFIX)) {
     throw new EntityReferenceError(
-      "Expected an opaque ID printed by `zen-agent spaces list` or `zen-agent tabs list`.",
+      "Expected an opaque ID printed by `zen-agent spaces list`.",
     );
   }
 
@@ -41,7 +41,7 @@ function decodeReference(reference: string): SerializedEntityReference {
 
   if (
     !isRecord(value) ||
-    (value["kind"] !== "space" && value["kind"] !== "tab") ||
+    value["kind"] !== "space" ||
     typeof value["profile"] !== "string" ||
     value["profile"].length === 0 ||
     typeof value["session"] !== "string" ||
@@ -60,9 +60,7 @@ function decodeReference(reference: string): SerializedEntityReference {
   };
 }
 
-export function formatEntityReference(
-  id: BrowserSpaceId | BrowserTabId,
-): string {
+export function formatEntityReference(id: BrowserSpaceId): string {
   const value: SerializedEntityReference = {
     kind: id.kind,
     profile: id.sessionId.profileId.transportId,
@@ -73,41 +71,10 @@ export function formatEntityReference(
   return `${REFERENCE_PREFIX}${Buffer.from(JSON.stringify(value), "utf8").toString("base64url")}`;
 }
 
-function requireReferenceKind(
-  reference: string,
-  kind: "space" | "tab",
-): SerializedEntityReference {
-  const decoded = decodeReference(reference);
-
-  if (decoded.kind !== kind) {
-    throw new EntityReferenceError(
-      `Expected a ${kind} ID, but the supplied opaque ID identifies a ${decoded.kind}.`,
-    );
-  }
-
-  return decoded;
-}
-
 export function parseSpaceReference(reference: string): BrowserSpaceId {
-  const decoded = requireReferenceKind(reference, "space");
+  const decoded = decodeReference(reference);
   return {
     kind: "space",
-    sessionId: {
-      kind: "session",
-      profileId: {
-        kind: "profile",
-        transportId: decoded.profile,
-      },
-      transportId: decoded.session,
-    },
-    transportId: decoded.id,
-  };
-}
-
-export function parseTabReference(reference: string): BrowserTabId {
-  const decoded = requireReferenceKind(reference, "tab");
-  return {
-    kind: "tab",
     sessionId: {
       kind: "session",
       profileId: {

@@ -1,21 +1,36 @@
-# CLI reference
+# Setup wizard and agent CLI reference
 
-The `zen-agent` CLI is a thin client of the shared per-profile daemon. It does
-not open a Native Messaging connection, inspect the focused tab, or start a
-second daemon. Zen must already have launched the native-host daemon for the
-configured profile.
+The installed `zen-agent` command is primarily a guided setup product. Run it in
+an interactive terminal to open the coral-accented wizard:
 
-When no configuration exists, the CLI discovers exactly one active profile
-daemon. More than one returns `ambiguous-profile`; it never chooses by focus or
-recency. Use `spaces list`, then `config map` with the returned opaque IDs to
-complete first-run setup. See
+```sh
+zen-agent
+```
+
+Use the arrow keys to move, Enter to select, and Escape to close a prompt. The
+wizard can install or refresh the Native Messaging host, show the remaining Zen
+profile requirements, check the daemon connection, map Personal and Work Spaces,
+and remove the host safely.
+
+Agents and scripts retain explicit commands with stable exit codes and JSON
+output. They do not have to automate the menu. The utility does not expose tab
+listing, resolution, navigation, reload, close, page inspection, or any other
+browser automation command; agents use the MCP server for browser operations.
+
+The CLI never opens a Native Messaging connection or starts a second daemon. Zen
+must already have launched the native-host daemon for `status`, Space discovery,
+and configuration mapping.
+
+When no configuration exists, the wizard and explicit commands discover exactly
+one active profile daemon. More than one returns `ambiguous-profile`; neither
+chooses by focus or recency. See
 [configuration](configuration.md#first-run-bootstrap).
 
 Run the built executable:
 
 ```sh
 npm run build
-node dist/cli.js --help
+node dist/cli.js
 ```
 
 An installed package exposes the same command as `zen-agent`.
@@ -24,64 +39,65 @@ An installed package exposes the same command as `zen-agent`.
 
 | Command                 | Behavior                                                                  |
 | ----------------------- | ------------------------------------------------------------------------- |
+| `setup`                 | Open the interactive setup wizard explicitly                              |
 | `status`                | Report sanitized daemon, profile, session, and registry-count state       |
-| `spaces list`           | List discovered Spaces and opaque stable IDs                              |
-| `tabs list`             | List discovered tabs, optionally filtered by an opaque Space ID           |
-| `tabs resolve`          | Reuse a safe URL/query match or open one background tab                   |
-| `tabs open`             | Resolve an absolute URL, reusing a safe exact match when one exists       |
-| `tabs navigate`         | Navigate one explicitly identified tab to an HTTP(S) URL                  |
-| `tabs reload`           | Reload one explicitly identified tab                                      |
-| `tabs close`            | Close one explicitly identified tab                                       |
+| `spaces list`           | List discovered Spaces and opaque stable IDs for configuration            |
 | `config map`            | Validate discovered IDs and atomically update Space mappings              |
 | `native-host install`   | Install the per-user macOS launcher and Native Messaging manifest         |
 | `native-host uninstall` | Remove only a launcher and manifest recognisably created by the installer |
+| `help`                  | Show the setup utility's command surface                                  |
+| `version`               | Print the installed Zen Agent version                                     |
 
-There is no foreground, activate, select, or “current tab” command.
+There is no `tabs` command and no foreground, activate, select, or current-tab
+shorthand. The complete browser automation surface is documented in
+[the MCP reference](mcp.md).
 
-`tabs open` and `tabs resolve` share the safe resolver. Despite the shorter
-name, CLI `tabs open` does not force a duplicate when the exact URL is already
-open in the chosen Space. The MCP tool `zen_tabs_open` is the lower-level
-always-create operation and requires explicit stable window and Space IDs.
+With no arguments, `zen-agent` opens the wizard only when both stdin and stdout
+are attached to a terminal. A pipe, CI job, or agent process receives help text
+instead of a prompt. `zen-agent setup` fails clearly without a TTY.
 
-## Common examples
+## Guided first-run setup
+
+Choose **Set up this Mac**. The wizard:
+
+1. Installs or safely refreshes the per-user Native Messaging host.
+2. Shows the preferences and extension-loading work that must be completed in
+   the intended Zen profile.
+3. Checks sanitized daemon health.
+4. Offers to map discovered Personal and Work Spaces when Zen is connected.
+
+It does not change Zen preferences, install an unsigned privileged extension,
+focus Zen, select a tab, or switch the visible Space.
+
+## Agent and script setup
+
+The same flow remains available without prompts:
+
+```sh
+zen-agent native-host install
+zen-agent spaces list
+zen-agent config map \
+  --personal '<opaque-personal-space-id>' \
+  --work '<opaque-work-space-id>' \
+  --alias 'research=<opaque-research-space-id>'
+```
+
+Use the sanitized status command for diagnostics:
 
 ```sh
 zen-agent status
-zen-agent spaces list
-zen-agent tabs list --json
-zen-agent tabs resolve https://example.com/ --space work --explain
-zen-agent tabs navigate '<opaque-tab-id>' https://example.com/next
-zen-agent tabs reload '<opaque-tab-id>'
-zen-agent tabs close '<opaque-tab-id>'
+zen-agent status --json
 ```
 
-URLs supplied for creation or navigation must be absolute HTTP(S) URLs.
-Privileged schemes such as `file:`, `data:`, and `javascript:` are refused. A
-free-text `tabs resolve` query searches currently known tab titles and URLs; it
-returns `not-found` rather than turning the query into a URL or opening a search
-page.
-
-`--space` accepts a configured role or alias for resolution, or the opaque ID
-printed by `spaces list`. `tabs list --space` intentionally accepts only an
-opaque ID, which prevents a stale or misspelled alias from silently changing the
-filter.
-
-## Opaque IDs and stale sessions
-
-Human output represents tab and Space IDs as strings beginning with `zen:`. They
-encode the entity kind, profile, browser session, and transport identity. Treat
-the complete value as opaque: do not decode it, splice it, or persist it as a
-long-lived bookmark.
-
-IDs survive a tab moving between Spaces, but a browser restart creates a new
-session and makes every old tab, window, and Space reference stale. List
-entities again after reconnecting. A stale reference returns an explicit error;
-Zen Agent never substitutes the selected tab.
+Space IDs are scoped to one browser session. List them again after a browser or
+native-host restart before changing configuration. `config map` verifies every
+requested ID against current discovery and refuses stale or guessed values.
 
 ## Output
 
-Human-readable output is intended for terminals. `--json` emits one stable
-envelope to stdout:
+The wizard is for people in a terminal. Explicit commands provide human-readable
+output by default; `--json` emits one stable envelope for commands that support
+it:
 
 ```json
 {
@@ -103,9 +119,9 @@ Errors in JSON mode use:
 }
 ```
 
-Without `--json`, errors go to stderr. Browser metadata may be returned by
-explicit list commands, but URLs, titles, form values, and tokens are excluded
-from default diagnostics.
+Without `--json`, errors go to stderr. Space metadata may be returned by the
+explicit discovery command, but URLs, titles, form values, and tokens are
+excluded from default diagnostics.
 
 ## Exit codes
 
@@ -114,7 +130,7 @@ from default diagnostics.
 | 0    | Success                                            |
 | 1    | Unexpected internal failure                        |
 | 2    | Invalid command, option, configuration, or payload |
-| 3    | Ambiguous routing or tab resolution                |
+| 3    | Ambiguous profile or routing context               |
 | 4    | Stale stable ID                                    |
 | 5    | Browser or daemon unavailable                      |
 | 6    | Unsupported browser capability or protocol         |
@@ -124,22 +140,10 @@ from default diagnostics.
 Scripts should use `--json` plus the exit code. They should not parse
 human-readable error text.
 
-## Mutation semantics
+## Automation boundary
 
-All mutations carry a fresh client idempotency key. The daemon serializes
-mutations per profile and deduplicates a retry only when the same client,
-method, key, and parameters are repeated. A daemon restart forgets its bounded
-in-memory idempotency cache, so the resolver still refreshes discovery before
-creating a tab.
-
-Navigation and reload may repeat network requests. Closing a tab can discard
-unsaved page state. None of these operations focuses Zen, selects a tab, or
-switches the visible Space.
-
-## Page inspection
-
-The shared daemon now supports bounded, read-only `pages.inspect` by explicit
-stable tab ID, and that operation is headed-proven in a non-visible Space. The
-CLI does not yet expose a corresponding command. There is still no element
-lookup, click, fill, typing, screenshot, upload, download, or arbitrary
-JavaScript command.
+`zen-agent-mcp` connects independently to the same daemon socket. Closing a CLI
+or MCP client does not stop the daemon or Zen. Browser policy, mutation
+serialization, stable-ID checks, and background-only guarantees remain in the
+daemon; removing browser commands from the CLI does not remove those
+capabilities from MCP.

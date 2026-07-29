@@ -19,8 +19,8 @@ pair is refused before the first snapshot or mutation even when it reports
 familiar capabilities. Add a build only after `npm run spike:transport` passes
 on that exact pair.
 
-Portable unit, contract, CLI, daemon, routing, resolution, and MCP tests do not
-require Zen and can run on Linux CI. Those tests do not expand the headed
+Portable unit, contract, setup CLI, daemon, routing, resolution, and MCP tests
+do not require Zen and can run on Linux CI. Those tests do not expand the headed
 browser support matrix.
 
 ## Platform limits
@@ -79,9 +79,9 @@ media playback unchanged. See
 
 Semantic snapshots, frame traversal, element identity, element lookup, click,
 fill, typing, keyboard input, selection, uploads, downloads, screenshots, dialog
-handling, and arbitrary JavaScript evaluation are not exposed. The CLI and MCP
-adapter also do not yet provide a page-inspection command/tool even though the
-read-only daemon method exists.
+handling, and arbitrary JavaScript evaluation are not exposed. The MCP adapter
+also does not yet provide a page-inspection tool even though the read-only
+daemon method exists.
 
 ## MCP dependency pins
 

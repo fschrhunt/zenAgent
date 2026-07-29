@@ -5,8 +5,8 @@
 <br />
 <br />
 
-**A considerate, space-aware CLI and MCP server for background automation in
-[Zen Browser](https://zen-browser.app/).**
+**A considerate, space-aware MCP server for background automation in
+[Zen Browser](https://zen-browser.app/), with a guided setup wizard.**
 
 Built for terminal-native agents that need to use the browser without taking
 over the window you are actively working in.
@@ -33,7 +33,7 @@ git clone https://github.com/fschrhunt/zen-agent.git
 cd zen-agent
 npm ci
 npm run build
-node dist/cli.js native-host install
+node dist/cli.js
 ```
 
 Zen Agent also needs its privileged extension in the intended Zen profile. Until
@@ -61,24 +61,24 @@ background.
 | **Reuse**       | Match an existing tab by its stable identifier instead of piling up duplicates. |
 | **Stay put**    | Never focus a window, switch a Space, or select a tab as a side effect.         |
 | **Space-aware** | Open new tabs in the right Personal or Work Space, in the background.           |
-| **One policy**  | Browser behaviour lives in a shared daemon, so the CLI and MCP server agree.    |
+| **One policy**  | Browser behaviour lives in a shared daemon and reaches agents through MCP.      |
 | **No nagging**  | No redundant approval prompt for ordinary browser actions.                      |
 
 ## Status
 
 **Prototype, with the background transport proven on one exact browser build.**
 The browser model, native-host daemon, configuration and routing policy, tab
-resolver, CLI, and stdio MCP adapter are implemented and covered by portable
-tests. The headed proof can enumerate tabs in non-visible Spaces and open, move,
-navigate, reload, and close explicitly identified background tabs without
-changing the selected tab, taking focus, or interrupting existing playback. A
-dedicated packaged actor can also return bounded URL, title, load state, and
-visible text from an explicitly identified loaded HTTP(S) tab in a non-visible
-Space.
+resolver, setup CLI, and stdio MCP adapter are implemented and covered by
+portable tests. The headed proof can enumerate tabs in non-visible Spaces and
+open, move, navigate, reload, and close explicitly identified background tabs
+without changing the selected tab, taking focus, or interrupting existing
+playback. A dedicated packaged actor can also return bounded URL, title, load
+state, and visible text from an explicitly identified loaded HTTP(S) tab in a
+non-visible Space.
 
 The headed result currently applies only to **Zen 1.21.9b / Gecko 153.0 on macOS
 27 arm64**. Other browser builds fail closed. Read-only `pages.inspect` exists
-through the daemon, but the CLI and MCP adapter do not expose it yet. Semantic
+through the daemon, but the MCP adapter does not expose it yet. Semantic
 snapshots and element interaction are still unimplemented. There is not yet a
 release-quality extension package, so this repository should still be treated as
 a source prototype rather than an end-user release. See
@@ -92,7 +92,7 @@ Requires **Node.js 24** and **npm 11+**.
 ```sh
 npm install
 npm run check
-npm run dev -- --help
+npm run dev
 ```
 
 Build the executable:
@@ -102,23 +102,25 @@ npm run build
 node dist/cli.js --help
 ```
 
-The command surface is documented in [docs/cli.md](docs/cli.md). All browser
-commands are clients of a local per-profile daemon; they never connect to Zen
-directly.
+Running `zen-agent` with no arguments in a terminal opens the arrow-key setup
+wizard. Explicit commands and `--json` remain available for agents and scripts.
+The complete setup and maintenance surface is documented in
+[docs/cli.md](docs/cli.md). Browser automation is exposed through the
+[MCP server](docs/mcp.md); the CLI intentionally has no tab commands.
 
 ## Source installation
 
-Register the native messaging host for the current macOS user after building:
+Start the guided setup after building:
 
 ```sh
-node dist/cli.js native-host install
+node dist/cli.js
 ```
 
-This creates or safely refreshes an owner-only launcher under
-`~/Library/Application Support/Zen Agent/` and the Firefox-compatible manifest
-under `~/Library/Application Support/Mozilla/NativeMessagingHosts/`. Existing
-files are changed only when both validate as Zen Agent-owned. Remove only files
-created by this installer with:
+Choose **Set up this Mac** to create or safely refresh an owner-only launcher
+under `~/Library/Application Support/Zen Agent/` and the Firefox-compatible
+manifest under `~/Library/Application Support/Mozilla/NativeMessagingHosts/`.
+Existing files are changed only when both validate as Zen Agent-owned. Remove
+only files created by this installer with:
 
 ```sh
 node dist/cli.js native-host uninstall
@@ -139,7 +141,7 @@ See [configuration](docs/configuration.md#first-run-bootstrap).
                 │
      ┌──────────┴──────────┐
      │                     │
- zen-agent CLI        MCP server
+setup wizard          MCP server
      │                     │
      └──────────┬──────────┘
                 ▼
@@ -153,11 +155,12 @@ See [configuration](docs/configuration.md#first-run-bootstrap).
 
 Zen launches the native host when the extension opens a Native Messaging port.
 That process owns the browser transport, live registry, routing and
-tab-resolution policy, mutation queue, and a local Unix socket. CLI and MCP
-clients connect to the socket; there is intentionally no separate daemon
+tab-resolution policy, mutation queue, and a local Unix socket. The setup CLI
+and MCP server connect to the socket; there is intentionally no separate daemon
 launcher. See [daemon lifecycle](docs/daemon.md),
 [ADR 0001](docs/adr/0001-browser-transport.md), and
-[ADR 0002](docs/adr/0002-shared-local-daemon.md).
+[ADR 0002](docs/adr/0002-shared-local-daemon.md). The setup-only CLI boundary is
+recorded in [ADR 0004](docs/adr/0004-setup-only-cli.md).
 
 For operational failures, start with
 [the troubleshooting guide](docs/troubleshooting.md).
