@@ -189,7 +189,7 @@ to be modelled as _unknown_, not guessed.
 
 **Proven.** A `setInterval(..., 100)` in a background tab advanced roughly once
 per second, not ten times. Standard background timer throttling applies to tabs
-Zen Agent drives, so any wait/poll logic in section 7 of the todo must not
+Zen Agent drives, so any wait/poll logic in section 8 of the todo must not
 assume sub-second timer resolution in a non-selected tab. Prefer BiDi-level
 waits (`wait: "complete"`, lifecycle events) over in-page polling.
 
@@ -263,7 +263,7 @@ Zen also already ships its own routing, in `zen-space-routing.jsonlz4`:
 }
 ```
 
-Section 3 of the todo should read and respect this file rather than invent a
+Section 4 of the todo should read and respect this file rather than invent a
 competing rule system.
 
 **The blocker.** BiDi's view of containers is unusable as a stable identity:

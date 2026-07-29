@@ -148,7 +148,12 @@ Bad:
   version matrix, not optimistic calls.
 - Adds a native host binary to install, package, and keep on PATH-independent
   absolute paths.
-- Host to browser messages are capped at 1 MiB; page snapshots must be chunked.
+- Host to browser messages are capped at 1 MiB, so the host chunks what it
+  sends. **Corrected during DEV-273:** the cap applies to the host-to-browser
+  direction only. Snapshots travel the other way, browser to host, where the
+  limit is 4 GB — so it is requests, not snapshots, that this constrains, and
+  requests are small. Chunking is implemented on the sending side regardless,
+  because a future page-interaction payload could approach it.
 
 ## Risks and stop conditions
 
@@ -185,3 +190,27 @@ Validated by `npm run spike:transport` (spike section 13):
 
 The remaining headed focus and media checks are acceptance tests for the first
 usable product, not blockers on this transport choice.
+
+### Confirmed under DEV-273
+
+The transport was then built and run headed against a real Zen
+(`npm run spike:transport`, three consecutive green runs). It closes the two
+gaps this section left open, and one risk this ADR did not anticipate:
+
+1. **A single MV3 add-on can declare `experiment_apis`.** Validation 1 and 4
+   above proved a privileged MV2 add-on and an MV3 native-messaging keepalive
+   _separately_. They work together in one add-on, so the MV2 fallback is not
+   needed and the event-page keepalive guarantee is kept.
+2. **Focus and media are clean.** The frontmost macOS application was unchanged
+   across the whole run, and a selected tab's audio kept advancing — 11.19s to
+   16.71s — across an open, navigate, and close cycle in background tabs, never
+   rewinding.
+3. **Unanticipated:** WebExtension replaces any exception from a privileged API
+   with "An unexpected error occurred". Since this ADR names drift in Zen's
+   internals as the main risk, losing the message would have made exactly the
+   predicted failure undiagnosable. The API therefore returns an outcome
+   envelope instead of throwing. `tab.ownerGlobal` also proved unreliable from
+   this sandbox for a tab in a non-visible Space, and is now resolved by
+   searching `allStoredTabs`.
+
+See [docs/transport.md](../transport.md) for the full evidence table.

@@ -6,7 +6,8 @@
   "private": true,
   "type": "module",
   "bin": {
-    "zen-agent": "./dist/cli.js"
+    "zen-agent": "./dist/cli.js",
+    "zen-agent-host": "./dist/native-host.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,7 +18,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "extension"
   ],
   "engines": {
     "node": ">=24",

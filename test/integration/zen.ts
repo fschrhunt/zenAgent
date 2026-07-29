@@ -91,6 +91,13 @@ export interface LaunchOptions {
    * restart pass of the extension probe must omit it.
    */
   readonly startupUrl?: string | null;
+  /**
+   * Extra environment for the Zen process.
+   *
+   * Native messaging hosts are launched by Zen and inherit its environment, so
+   * this is how a scenario host learns where its fixture server is listening.
+   */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 const BIDI_BANNER = /WebDriver BiDi listening on (ws:\/\/\S+)/;
@@ -126,7 +133,7 @@ export async function launchScratchZen(
   ];
 
   const child = spawn(zen.binary, args, {
-    env: { ...process.env, MOZ_NO_REMOTE: "1" },
+    env: { ...process.env, MOZ_NO_REMOTE: "1", ...options.env },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
