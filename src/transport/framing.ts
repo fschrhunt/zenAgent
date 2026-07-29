@@ -109,9 +109,12 @@ export class MessageDecoder {
 
       try {
         messages.push(JSON.parse(body.toString("utf8")));
-      } catch (error) {
+      } catch {
+        // JSON parser messages can include excerpts of the invalid body. The
+        // native stream may contain page-derived data, so never copy them into
+        // diagnostics or protocol errors.
         throw new FramingError(
-          `A native messaging frame did not contain valid JSON: ${String(error)}`,
+          "A native messaging frame did not contain valid JSON.",
         );
       }
     }

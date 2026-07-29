@@ -28,11 +28,13 @@ export default defineConfig(
   {
     // Browser-chrome code that runs inside Zen, not Node. Its globals are
     // injected by Firefox's SchemaAPIManager sandbox.
-    files: ["extension/**/*.js", "test/integration/fixtures/**/*.js"],
+    files: ["extension/**/*.{js,mjs}", "test/integration/fixtures/**/*.js"],
     languageOptions: {
       globals: {
         ExtensionAPI: "readonly",
         ExtensionCommon: "readonly",
+        JSWindowActorChild: "readonly",
+        JSWindowActorParent: "readonly",
         IOUtils: "readonly",
         Services: "readonly",
         ChromeUtils: "readonly",

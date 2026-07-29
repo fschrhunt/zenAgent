@@ -55,6 +55,35 @@
         ]
       },
       {
+        "name": "reloadTab",
+        "type": "function",
+        "async": true,
+        "description": "Reload the tab with this identifier. Does not select it.",
+        "parameters": [{ "name": "tabId", "type": "string" }]
+      },
+      {
+        "name": "inspectPage",
+        "type": "function",
+        "async": true,
+        "description": "Read bounded metadata and visible text from the loaded HTTP(S) document in the tab with this identifier. Does not select it.",
+        "parameters": [
+          { "name": "tabId", "type": "string" },
+          {
+            "name": "options",
+            "type": "object",
+            "optional": true,
+            "properties": {
+              "maxChars": {
+                "type": "integer",
+                "optional": true,
+                "minimum": 1,
+                "maximum": 10000
+              }
+            }
+          }
+        ]
+      },
+      {
         "name": "closeTab",
         "type": "function",
         "async": true,

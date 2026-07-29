@@ -15,7 +15,16 @@ import type {
   PrivateWindowPolicy,
 } from "../browser/model.js";
 import {
+  assertBrowserSnapshotLimits,
+  ResourceLimitError,
+} from "../security/limits.js";
+import {
+  BrowserUrlPolicyError,
+  validateBrowserUrl,
+} from "../security/url-policy.js";
+import {
   assertRequiredCapabilities,
+  assertSupportedZenBuild,
   knownCapabilities,
   requireCapability,
   type TransportCapability,
@@ -69,6 +78,17 @@ export interface ZenTransportOptions {
 }
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+export const MAX_REQUEST_TIMEOUT_MS = 5 * 60_000;
+export const MAX_PAGE_INSPECTION_CHARS = 10_000;
+
+export interface PageInspection {
+  readonly url: string;
+  readonly title: string;
+  readonly loadState: "loading" | "interactive" | "complete";
+  readonly visibleText: string;
+  readonly truncated: boolean;
+  readonly visitedTextNodes: number;
+}
 
 interface PendingRequest {
   readonly resolve: (value: unknown) => void;
@@ -97,9 +117,21 @@ export class ZenTransport {
     connection: TransportConnection,
     options: ZenTransportOptions = {},
   ) {
-    this.#connection = connection;
-    this.#requestTimeoutMs =
+    const requestTimeoutMs =
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+
+    if (
+      !Number.isSafeInteger(requestTimeoutMs) ||
+      requestTimeoutMs <= 0 ||
+      requestTimeoutMs > MAX_REQUEST_TIMEOUT_MS
+    ) {
+      throw new TypeError(
+        `A transport request timeout must be an integer from 1 through ${String(MAX_REQUEST_TIMEOUT_MS)} milliseconds.`,
+      );
+    }
+
+    this.#connection = connection;
+    this.#requestTimeoutMs = requestTimeoutMs;
     this.#privateWindowPolicy = options.privateWindowPolicy;
     this.#now = options.now ?? (() => new Date().toISOString());
 
@@ -145,16 +177,22 @@ export class ZenTransport {
     const description = described as {
       capabilities?: unknown;
       browserVersion?: unknown;
+      geckoVersion?: unknown;
     };
+    const browserVersion =
+      typeof description.browserVersion === "string"
+        ? description.browserVersion
+        : "unreported";
+    const geckoVersion =
+      typeof description.geckoVersion === "string"
+        ? description.geckoVersion
+        : "unreported";
+
+    assertSupportedZenBuild({ browserVersion, geckoVersion });
     this.#capabilities = knownCapabilities(
       Array.isArray(description.capabilities) ? description.capabilities : [],
     );
-    assertRequiredCapabilities(
-      this.#capabilities,
-      typeof description.browserVersion === "string"
-        ? description.browserVersion
-        : "of an unreported version",
-    );
+    assertRequiredCapabilities(this.#capabilities, browserVersion);
     this.#connectedAt = this.#now();
 
     return this.snapshot();
@@ -176,6 +214,16 @@ export class ZenTransport {
         ? {}
         : { privateWindowPolicy: this.#privateWindowPolicy }),
     });
+
+    try {
+      assertBrowserSnapshotLimits(snapshot);
+    } catch (error) {
+      if (error instanceof ResourceLimitError) {
+        throw new TransportProtocolError("payload-too-large", error.message);
+      }
+
+      throw error;
+    }
 
     const previous = this.#sessionId;
     const current = snapshot.sessions[0]?.id;
@@ -206,13 +254,23 @@ export class ZenTransport {
     readonly windowId?: string;
     readonly zenSpaceUuid?: string;
   }): Promise<string> {
+    const url = transportBrowserUrl(options.url);
+    const windowId =
+      options.windowId === undefined
+        ? undefined
+        : transportIdentifier(options.windowId, "window");
+    const zenSpaceUuid =
+      options.zenSpaceUuid === undefined
+        ? undefined
+        : transportIdentifier(options.zenSpaceUuid, "Space");
+
     requireCapability(
       this.#capabilities,
       "zen.tabs.open-background",
       "Opening a background tab",
     );
 
-    if (options.zenSpaceUuid !== undefined) {
+    if (zenSpaceUuid !== undefined) {
       requireCapability(
         this.#capabilities,
         "zen.spaces.route",
@@ -220,7 +278,11 @@ export class ZenTransport {
       );
     }
 
-    const result = await this.#send("tabs.open", options);
+    const result = await this.#send("tabs.open", {
+      url,
+      ...(windowId === undefined ? {} : { windowId }),
+      ...(zenSpaceUuid === undefined ? {} : { zenSpaceUuid }),
+    });
     const tabId = (result as { tabId?: unknown } | null)?.tabId;
 
     if (typeof tabId !== "string") {
@@ -241,21 +303,75 @@ export class ZenTransport {
    * already have, in the right Space" possible without opening a duplicate.
    */
   public async moveTab(tabId: string, zenSpaceUuid: string): Promise<void> {
+    const stableTabId = transportIdentifier(tabId, "tab");
+    const stableSpaceId = transportIdentifier(zenSpaceUuid, "Space");
     requireCapability(
       this.#capabilities,
       "zen.spaces.route",
       "Routing a tab into a Space",
     );
-    await this.#send("tabs.move", { tabId, zenSpaceUuid });
+    await this.#send("tabs.move", {
+      tabId: stableTabId,
+      zenSpaceUuid: stableSpaceId,
+    });
   }
 
   /** Navigate a tab named by explicit identifier. Never the selected tab implicitly. */
   public async navigateTab(tabId: string, url: string): Promise<void> {
-    await this.#send("tabs.navigate", { tabId, url });
+    await this.#send("tabs.navigate", {
+      tabId: transportIdentifier(tabId, "tab"),
+      url: transportBrowserUrl(url),
+    });
+  }
+
+  /** Reload a tab named by explicit identifier. Never the selected tab implicitly. */
+  public async reloadTab(tabId: string): Promise<void> {
+    await this.#send("tabs.reload", {
+      tabId: transportIdentifier(tabId, "tab"),
+    });
+  }
+
+  /**
+   * Inspect one loaded HTTP(S) document by explicit stable tab identifier.
+   *
+   * The extension enforces the same bound again; checking here gives a useful
+   * refusal before page content is touched.
+   */
+  public async inspectPage(
+    tabId: string,
+    options: { readonly maxChars?: number } = {},
+  ): Promise<PageInspection> {
+    const stableTabId = transportIdentifier(tabId, "tab");
+    requireCapability(
+      this.#capabilities,
+      "browser.pages.inspect",
+      "Inspecting page content",
+    );
+
+    const maxChars = options.maxChars ?? 2_000;
+
+    if (
+      !Number.isInteger(maxChars) ||
+      maxChars < 1 ||
+      maxChars > MAX_PAGE_INSPECTION_CHARS
+    ) {
+      throw new TransportProtocolError(
+        "invalid-request",
+        `maxChars must be an integer from 1 through ${String(MAX_PAGE_INSPECTION_CHARS)}.`,
+      );
+    }
+
+    const result = await this.#send("pages.inspect", {
+      tabId: stableTabId,
+      maxChars,
+    });
+    return parsePageInspection(result, maxChars);
   }
 
   public async closeTab(tabId: string): Promise<void> {
-    await this.#send("tabs.close", { tabId });
+    await this.#send("tabs.close", {
+      tabId: transportIdentifier(tabId, "tab"),
+    });
   }
 
   public close(): void {
@@ -445,6 +561,74 @@ export class ZenTransport {
       listener(event);
     }
   }
+}
+
+function parsePageInspection(value: unknown, maxChars: number): PageInspection {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TransportProtocolError(
+      "invalid-request",
+      "pages.inspect did not return an inspection object.",
+    );
+  }
+
+  const result = value as Readonly<Record<string, unknown>>;
+  const loadState = result["loadState"];
+  const visibleText = result["visibleText"];
+  const visitedTextNodes = result["visitedTextNodes"];
+
+  if (
+    typeof result["url"] !== "string" ||
+    result["url"].length > 16_384 ||
+    typeof result["title"] !== "string" ||
+    result["title"].length > 1_024 ||
+    !["loading", "interactive", "complete"].includes(String(loadState)) ||
+    typeof visibleText !== "string" ||
+    visibleText.length > maxChars ||
+    typeof result["truncated"] !== "boolean" ||
+    !Number.isInteger(visitedTextNodes) ||
+    Number(visitedTextNodes) < 0 ||
+    Number(visitedTextNodes) > 10_000
+  ) {
+    throw new TransportProtocolError(
+      "invalid-request",
+      "pages.inspect returned an invalid or unbounded inspection.",
+    );
+  }
+
+  return {
+    url: result["url"],
+    title: result["title"],
+    loadState: loadState as PageInspection["loadState"],
+    visibleText,
+    truncated: result["truncated"],
+    visitedTextNodes: Number(visitedTextNodes),
+  };
+}
+
+function transportBrowserUrl(value: string): string {
+  try {
+    return validateBrowserUrl(value);
+  } catch (error) {
+    if (error instanceof BrowserUrlPolicyError) {
+      throw new TransportProtocolError("invalid-request", error.message);
+    }
+
+    throw error;
+  }
+}
+
+function transportIdentifier(value: string, kind: string): string {
+  if (
+    value.trim().length === 0 ||
+    Buffer.byteLength(value, "utf8") > 4 * 1024
+  ) {
+    throw new TransportProtocolError(
+      "invalid-request",
+      `An explicit ${kind} identifier must be between 1 and 4096 bytes.`,
+    );
+  }
+
+  return value;
 }
 
 function reasonOf(payload: unknown): string | undefined {

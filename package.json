@@ -7,7 +7,8 @@
   "type": "module",
   "bin": {
     "zen-agent": "./dist/cli.js",
-    "zen-agent-host": "./dist/native-host.js"
+    "zen-agent-host": "./dist/native-host.js",
+    "zen-agent-mcp": "./dist/mcp.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -47,5 +48,12 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.4.3"
+  },
+  "overrides": {
+    "@hono/node-server": "2.0.12"
   }
 }

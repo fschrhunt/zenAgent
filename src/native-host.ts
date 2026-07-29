@@ -6,12 +6,13 @@
  * Never write to stdout from here: it is the wire.
  */
 
-import { startNativeHost } from "./native/host.js";
+import { startNativeDaemonHost } from "./native/daemon-host.js";
+import { crashDiagnostic } from "./security/diagnostics.js";
 
 try {
-  const host = await startNativeHost();
+  const host = await startNativeDaemonHost();
   await host.closed;
 } catch (error) {
-  process.stderr.write(`zen-agent: ${String(error)}\n`);
+  process.stderr.write(`${crashDiagnostic("zen-agent", error)}\n`);
   process.exitCode = 1;
 }

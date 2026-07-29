@@ -27,8 +27,24 @@ export type TransportErrorCode =
   | "timeout"
   /** The result could not be delivered within the message size limits. */
   | "payload-too-large"
+  /** The operation would violate a background-safety policy. */
+  | "policy-rejection"
   /** An unexpected failure inside the extension or host. */
   | "internal";
+
+export const TRANSPORT_ERROR_CODES: readonly TransportErrorCode[] = [
+  "protocol-version-mismatch",
+  "unsupported-capability",
+  "browser-unavailable",
+  "invalid-request",
+  "stale-id",
+  "timeout",
+  "payload-too-large",
+  "policy-rejection",
+  "internal",
+];
+
+const MAX_PROTOCOL_STRING_BYTES = 4 * 1024;
 
 export interface TransportErrorBody {
   readonly code: TransportErrorCode;
@@ -82,8 +98,10 @@ export type TransportMessage =
 export const TRANSPORT_METHODS = [
   "session.describe",
   "browser.snapshot",
+  "pages.inspect",
   "tabs.open",
   "tabs.navigate",
+  "tabs.reload",
   "tabs.close",
   "tabs.move",
 ] as const;
@@ -123,6 +141,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function isBoundedString(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    Buffer.byteLength(value, "utf8") <= MAX_PROTOCOL_STRING_BYTES
+  );
+}
+
+function isTransportErrorCode(value: unknown): value is TransportErrorCode {
+  return (
+    typeof value === "string" &&
+    (TRANSPORT_ERROR_CODES as readonly string[]).includes(value)
+  );
+}
+
 /**
  * Validate a decoded frame as a protocol message.
  *
@@ -142,16 +175,13 @@ export function parseMessage(value: unknown): TransportMessage {
   if (protocolVersion !== TRANSPORT_PROTOCOL_VERSION) {
     throw new TransportProtocolError(
       "protocol-version-mismatch",
-      `This build speaks protocol version ${String(TRANSPORT_PROTOCOL_VERSION)}; the peer sent ${JSON.stringify(protocolVersion)}. Reinstall the Zen Agent extension and host together.`,
+      `This build speaks protocol version ${String(TRANSPORT_PROTOCOL_VERSION)}; the peer sent a different version. Reinstall the Zen Agent extension and host together.`,
     );
   }
 
   switch (type) {
     case "request": {
-      if (
-        typeof value["id"] !== "string" ||
-        typeof value["method"] !== "string"
-      ) {
+      if (!isBoundedString(value["id"]) || !isBoundedString(value["method"])) {
         throw new TransportProtocolError(
           "invalid-request",
           "A request must carry a string id and method.",
@@ -161,7 +191,7 @@ export function parseMessage(value: unknown): TransportMessage {
       return value as unknown as TransportRequest;
     }
     case "response": {
-      if (typeof value["id"] !== "string") {
+      if (!isBoundedString(value["id"])) {
         throw new TransportProtocolError(
           "invalid-request",
           "A response must carry a string id.",
@@ -171,17 +201,27 @@ export function parseMessage(value: unknown): TransportMessage {
       return value as unknown as TransportResponse;
     }
     case "error": {
-      if (typeof value["id"] !== "string" || !isRecord(value["error"])) {
+      if (!isBoundedString(value["id"]) || !isRecord(value["error"])) {
         throw new TransportProtocolError(
           "invalid-request",
           "An error response must carry a string id and an error body.",
         );
       }
 
+      if (
+        !isTransportErrorCode(value["error"]["code"]) ||
+        !isBoundedString(value["error"]["message"])
+      ) {
+        throw new TransportProtocolError(
+          "invalid-request",
+          "An error response must carry a recognized code and bounded message.",
+        );
+      }
+
       return value as unknown as TransportErrorResponse;
     }
     case "event": {
-      if (typeof value["event"] !== "string") {
+      if (!isBoundedString(value["event"])) {
         throw new TransportProtocolError(
           "invalid-request",
           "An event must carry a string event name.",
@@ -193,7 +233,7 @@ export function parseMessage(value: unknown): TransportMessage {
     default:
       throw new TransportProtocolError(
         "invalid-request",
-        `Unknown protocol message type ${JSON.stringify(type)}.`,
+        "Unknown protocol message type.",
       );
   }
 }

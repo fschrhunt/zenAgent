@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ChunkAssembler,
   ChunkingError,
+  DEFAULT_MAX_CHUNKS_PER_MESSAGE,
   encodeChunked,
   isChunkEnvelope,
 } from "../../src/transport/chunking.js";
@@ -122,6 +123,37 @@ describe("chunking", () => {
         body: Buffer.alloc(64).toString("base64"),
       }),
     ).toThrow(ChunkingError);
+  });
+
+  it("refuses an excessive chunk count before allocating its slice array", () => {
+    const assembler = new ChunkAssembler();
+
+    expect(() =>
+      assembler.accept({
+        type: "chunk",
+        id: "a",
+        index: 0,
+        count: DEFAULT_MAX_CHUNKS_PER_MESSAGE + 1,
+        body: "AA==",
+      }),
+    ).toThrow(/declared more than/);
+  });
+
+  it("rejects non-canonical base64 and oversized outgoing values", () => {
+    const assembler = new ChunkAssembler();
+
+    expect(() =>
+      assembler.accept({
+        type: "chunk",
+        id: "a",
+        index: 0,
+        count: 1,
+        body: "not base64!",
+      }),
+    ).toThrow(/canonical base64/);
+    expect(() =>
+      encodeChunked({ value: "x".repeat(2_000) }, 256, "bounded", 512),
+    ).toThrow(/exceeds the 512 byte limit/);
   });
 
   it("bounds how many messages may reassemble at once", () => {
