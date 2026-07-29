@@ -54,6 +54,9 @@ describe.skipIf(!enabled || zen === undefined)(
     beforeAll(async () => {
       if (zen === undefined) throw new Error("Zen not found");
       instance = await launchScratchZen(zen, { headless });
+      if (instance.sessionUrl === undefined) {
+        throw new Error("Zen did not announce a BiDi endpoint");
+      }
       client = await BidiClient.connect(instance.sessionUrl);
       await client.newSession();
       await client.subscribe([

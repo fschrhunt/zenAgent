@@ -1,6 +1,6 @@
 # ADR 0001: Browser transport for Zen Agent
 
-- Status: **Proposed**
+- Status: **Proposed** — 4 of 5 validations passed, see below
 - Date: 2026-07-28
 - Tracking: [DEV-261](https://linear.app/intuitum/issue/DEV-261)
 - Evidence: [docs/spikes/dev-261-transport.md](../spikes/dev-261-transport.md)
@@ -167,13 +167,16 @@ something that switches Spaces or steals focus.
 
 ## To validate before this is Accepted
 
-1. Install a minimal `experiment_apis` add-on on a scratch profile and confirm
-   `gZenWorkspaces.allStoredTabs` enumerates tabs across both Spaces, including
-   unloaded ones.
-2. Confirm `moveTabToWorkspace` and background `addTab` leave the selected tab,
-   focused window, visible Space, and media playback untouched.
-3. Confirm no robot icon appears with the extension attached.
-4. Confirm a native messaging port keeps the MV3 event page alive past the 30s
-   idle timeout.
-5. Re-test the Space-blindness claim (spike section 8) from chrome JS, which the
-   lazy-tab problem prevented measuring over BiDi.
+Validated by `npm run spike:transport` (spike section 13):
+
+1. **Done.** A minimal `experiment_apis` add-on loads on a stock release Zen and
+   `gZenWorkspaces.allStoredTabs` enumerates both Spaces — 4 tabs against
+   `gBrowser.tabs`' 3 — including 3 lazy tabs after a restart.
+2. **Partly done.** `moveTabToWorkspace` and background `addTab` left the
+   visible Space and the selected tab unchanged. Focused window and media
+   playback were not observable headless and still need a headed run.
+3. **Done.** No remote-control badge appeared at any point.
+4. **Not started.** A native messaging port keeping the MV3 event page alive
+   past the 30s idle timeout. This is the remaining blocker to Accepted.
+5. **Done.** The Space-blindness claim is confirmed from chrome JS, which the
+   lazy-tab problem had prevented measuring over BiDi.

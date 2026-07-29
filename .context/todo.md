@@ -117,10 +117,13 @@ proven items are re-runnable with `npm run spike:transport`.
         same `gBrowser.tabs`, so `tabs.query({})` has the identical
         active-Space-only blind spot, and `tabs.update({active:true})` on a
         foreign-Space tab switches the visible Space.
-  - [ ] A privileged `experiment_apis` extension. Viable: Zen ships
-        `MOZ_REQUIRE_SIGNING: false`, so `extensions.experiments.enabled` is a
-        live pref and the parent script gets a system-principal sandbox with
-        `gZenWorkspaces.allStoredTabs` and `moveTabToWorkspace`.
+  - [x] A privileged `experiment_apis` extension. **Chosen** in ADR 0001 and
+        validated end to end: it loads on a stock release Zen, enumerates both
+        Spaces including lazy restored tabs, routes a background tab without
+        switching the visible Space, and shows no remote-control badge. Zen
+        ships `MOZ_REQUIRE_SIGNING: false`, so `extensions.experiments.enabled`
+        is a live pref and the parent script gets a system-principal sandbox
+        with `gZenWorkspaces.allStoredTabs` and `moveTabToWorkspace`.
   - [ ] An extension plus Native Messaging host. Note an open native port is the
         only supported way to keep an MV3 event page alive; a WebSocket is not,
         and the default MV3 CSP silently upgrades `ws://` to `wss://`.
@@ -129,7 +132,10 @@ proven items are re-runnable with `npm run spike:transport`.
 - [ ] Prove that the transport can list tabs without changing selected tab,
       focused window, or visible Space. Selected tab and focused window proven.
       Visible Space needs a headed run.
-- [ ] Prove that it can open a background tab in a requested Space.
+- [x] Prove that it can open a background tab in a requested Space. Done from
+      chrome JS: `gBrowser.addTab(url, { inBackground: true })` followed by
+      `gZenWorkspaces.moveTabToWorkspace(tab, uuid)`, with the visible Space and
+      selected tab unchanged. Not reachable over BiDi.
 - [x] Prove that it can navigate an existing non-selected tab without selecting
       it.
 - [ ] Prove that it can interact with a non-selected page while another tab

@@ -53,10 +53,10 @@ export function locateZen(): ZenBuild | undefined {
 
 export interface ScratchZen {
   readonly process: ChildProcess;
-  /** The endpoint Zen announces, e.g. "ws://127.0.0.1:56884". */
-  readonly webSocketUrl: string;
+  /** The endpoint Zen announces; absent when launched without a remote agent. */
+  readonly webSocketUrl: string | undefined;
   /** The endpoint a client actually connects to, to run `session.new`. */
-  readonly sessionUrl: string;
+  readonly sessionUrl: string | undefined;
   readonly profileDir: string;
   readonly stderr: () => string;
   readonly stop: () => Promise<void>;
@@ -66,10 +66,31 @@ export interface LaunchOptions {
   readonly port?: number;
   /**
    * Headless keeps the spike from stealing focus from the user's real session.
-   * Headed runs are required to observe Zen Spaces, which are chrome UI.
+   * Headless instances also register as `BackgroundOnly` with LaunchServices,
+   * so they never appear in the Dock.
    */
   readonly headless?: boolean;
   readonly timeoutMs?: number;
+  /**
+   * Start the WebDriver BiDi remote agent. Defaults to true.
+   *
+   * The extension probe sets this false: it needs no remote protocol, which is
+   * precisely why it shows no remote-control badge and rewrites no preferences.
+   */
+  readonly remoteAgent?: boolean;
+  /** Seeds the freshly created profile before Zen is started. */
+  readonly prepareProfile?: (profileDir: string) => void;
+  /** Reuse an existing profile instead of creating one. */
+  readonly profileDir?: string;
+  /** Leave the profile on disk at stop(), so it can be relaunched. */
+  readonly keepProfile?: boolean;
+  /**
+   * URL to open at startup, or null for none.
+   *
+   * Passing a URL on the command line suppresses session restore, so the
+   * restart pass of the extension probe must omit it.
+   */
+  readonly startupUrl?: string | null;
 }
 
 const BIDI_BANNER = /WebDriver BiDi listening on (ws:\/\/\S+)/;
@@ -87,17 +108,21 @@ export async function launchScratchZen(
 ): Promise<ScratchZen> {
   const port = options.port ?? 0;
   const headless = options.headless ?? true;
+  const remoteAgent = options.remoteAgent ?? true;
   const timeoutMs = options.timeoutMs ?? 60_000;
-  const profileDir = mkdtempSync(join(tmpdir(), "zen-agent-spike-"));
+  const startupUrl =
+    options.startupUrl === undefined ? "about:blank" : options.startupUrl;
+  const profileDir =
+    options.profileDir ?? mkdtempSync(join(tmpdir(), "zen-agent-spike-"));
+  options.prepareProfile?.(profileDir);
 
   const args = [
     "--profile",
     profileDir,
     "--no-remote",
-    "--remote-debugging-port",
-    String(port),
+    ...(remoteAgent ? ["--remote-debugging-port", String(port)] : []),
     ...(headless ? ["--headless"] : []),
-    "about:blank",
+    ...(startupUrl === null ? [] : [startupUrl]),
   ];
 
   const child = spawn(zen.binary, args, {
@@ -131,8 +156,21 @@ export async function launchScratchZen(
       ]);
       if (child.exitCode === null) child.kill("SIGKILL");
     }
-    rmSync(profileDir, { recursive: true, force: true });
+    if (options.keepProfile !== true) {
+      rmSync(profileDir, { recursive: true, force: true });
+    }
   };
+
+  if (!remoteAgent) {
+    return {
+      process: child,
+      webSocketUrl: undefined,
+      sessionUrl: undefined,
+      profileDir,
+      stderr: () => stderr,
+      stop,
+    };
+  }
 
   const webSocketUrl = await new Promise<string>((resolve, reject) => {
     const deadline = Date.now() + timeoutMs;

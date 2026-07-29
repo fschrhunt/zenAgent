@@ -336,11 +336,17 @@ Two further consequences, from the same shipped sources:
   `change-workspace` attribute, which forces the switch. So a background tab
   opened in a chosen Space is not reachable this way either.
 
-**Not yet confirmed empirically.** The code chain is unambiguous, but it has not
-been observed against a live profile with two Spaces, because the scratch
-profiles used here only ever have one. This is the single most important thing
-to verify in the headed run below; if it somehow does not reproduce, the
-architecture opens back up.
+**Now confirmed empirically** (see section 13). Measured from chrome JS on a
+profile with two Spaces and a background tab routed into the non-visible one:
+
+```
+allStoredTabs : 4  { activeSpace: 3, otherSpace: 1 }
+gBrowser.tabs : 3  { activeSpace: 3 }
+```
+
+The tab in the non-visible Space is present in `allStoredTabs` and absent from
+`gBrowser.tabs` — the collection BiDi enumerates through. The code trace was
+right.
 
 ## 9. What that leaves
 
@@ -503,13 +509,40 @@ How long it stays up differs by transport, and that matters:
 - **WebExtension**: never appears. `gRemoteControl` does not consult the add-on
   manager.
 
+## 13. The privileged extension clears every bar BiDi could not
+
+**Proven**, and re-runnable with `npm run spike:transport`. A minimal
+`experiment_apis` add-on was built, dropped into a scratch profile as an
+unsigned XPI, and left to report by writing a JSON file — **no remote protocol
+involved at any point**.
+
+It loaded and ran with chrome privileges on a stock release Zen, confirming the
+`MOZ_REQUIRE_SIGNING: false` reasoning in section 9. Results:
+
+| Claim                                      | Result                                                    |
+| ------------------------------------------ | --------------------------------------------------------- |
+| Enumerates tabs in non-visible Spaces      | **yes** — `allStoredTabs` 4 vs `gBrowser.tabs` 3          |
+| Enumerates lazy, session-restored tabs     | **yes** — 3 lazy tabs seen after a restart                |
+| Creates a Space without switching to it    | yes, via `createAndSaveWorkspace(..., dontChange = true)` |
+| Routes a background tab into another Space | yes, via `moveTabToWorkspace`                             |
+| Visible Space unchanged                    | yes                                                       |
+| Selected tab unchanged                     | yes                                                       |
+| Remote-control badge                       | **never appeared**                                        |
+
+The second row is the one that matters most. Section 11 measured BiDi seeing one
+tab out of 22 because session-restored tabs are lazy. The extension enumerates
+those same lazy tabs directly off the tab strip, because `linkedPanel` being
+unset does not stop `allStoredTabs` from walking the DOM.
+
+Two honest gaps in this run: it was headless, so "focused window unchanged" was
+not meaningfully observable, and no media playback was exercised. Both belong in
+a headed run.
+
 ## Open questions still to test
 
 These need a **headed** run against a profile that has real Zen Spaces, which
 means restarting the user's daily Zen with `--remote-debugging-port`:
 
-- **Confirm §8 empirically**: with Personal visible, does
-  `browsingContext.getTree` really omit every Work tab?
 - **Confirm §1 empirically**, on a scratch profile first: does
   `--start-debugger-server` forwarded into a running Zen open a privileged
   server, and does it raise the window on macOS?
