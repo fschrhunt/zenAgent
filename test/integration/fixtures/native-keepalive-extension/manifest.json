@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Zen Agent Native Keepalive Probe",
+  "version": "0.0.1",
+  "description": "DEV-261: validates that a native messaging port keeps Firefox's MV3 event page alive.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "zen-agent-native-keepalive-probe@zen-agent.local",
+      "strict_min_version": "128.0"
+    }
+  },
+  "permissions": ["nativeMessaging"],
+  "background": {
+    "scripts": ["background.js"]
+  }
+}

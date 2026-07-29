@@ -68,13 +68,16 @@ node dist/cli.js --help
                 ▼
        shared local daemon
                 ▼
-     Firefox Remote Protocol
+      native messaging host
+                ▼
+    privileged Zen extension
                 ▼
    Zen windows → Spaces → tabs
 ```
 
-The daemon owns discovery, stable tab identities, Personal/Work routing, and
-background-only navigation.
+The daemon will own discovery, stable tab identities, Personal/Work routing, and
+background-only navigation. See [ADR 0001](docs/adr/0001-browser-transport.md)
+for why the extension transport was selected over WebDriver BiDi.
 
 ## Contributing
 

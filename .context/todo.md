@@ -63,44 +63,112 @@ Every implementation phase must preserve these invariants:
 
 Tracking: [DEV-261](https://linear.app/intuitum/issue/DEV-261)
 
-- [ ] Record the exact Zen Browser version, Firefox version, macOS version, and
-      active profile layout used for the spike.
-- [ ] Determine whether Zen can expose a remote protocol from an already running
-      daily-use browser session.
-- [ ] Test Firefox Remote Agent/WebDriver BiDi with Zen.
-- [ ] Determine whether BiDi can discover tabs that existed before the client
-      connected.
-- [ ] Determine whether BiDi can create, navigate, inspect, and interact with a
-      background browsing context without activating it.
+Findings are written up in
+[docs/spikes/dev-261-transport.md](../docs/spikes/dev-261-transport.md), and the
+proven items are re-runnable with `npm run spike:transport`.
+
+- [x] Record the exact Zen Browser version, Firefox version, macOS version, and
+      active profile layout used for the spike. Zen 1.21.9b / Gecko 153.0 /
+      macOS 27.0 arm64 / Node 26.5.0; daily profile
+      `tddguwg7.Default (release)`.
+- [x] Determine whether Zen can expose a remote protocol from an already running
+      daily-use browser session. **Not BiDi, but yes via DevTools RDP.** The
+      BiDi remote agent can only be armed from a `STATE_INITIAL_LAUNCH` command
+      line. However `DevToolsStartup` handles **forwarded** command lines, so
+      `zen --profile <same> --start-debugger-server <port>` starts a
+      chrome-privileged server (`allowChromeProcess = true`, `keepAlive = true`)
+      inside a live session, gated only on `devtools.debugger.remote-enabled`
+      and `devtools.chrome.enabled` read live. Costs a one-time pref bootstrap,
+      and possibly one macOS window raise per browser run.
+- [x] Test Firefox Remote Agent/WebDriver BiDi with Zen. Works unmodified; Zen
+      inherits the Firefox remote agent. Connect to `ws://host:port/session`,
+      not the bare URL Zen prints.
+- [x] Determine whether BiDi can discover tabs that existed before the client
+      connected. Yes.
+- [x] Determine whether BiDi can create, navigate, inspect, and interact with a
+      background browsing context without activating it. Yes, including
+      `input.performActions` and `captureScreenshot`.
 - [ ] Determine whether stable browsing-context IDs survive navigation, process
-      changes, tab movement, and Space changes.
-- [ ] Determine which lifecycle events exist for window, tab, navigation, crash,
-      and close events.
-- [ ] Test whether Zen exposes its Space IDs, names, order, and tab membership
-      through the remote protocol.
-- [ ] Test whether Firefox container identity is sufficient to infer Zen Space
-      membership.
-- [ ] Compare the viable transports:
-  - [ ] WebDriver BiDi/Firefox Remote Agent.
-  - [ ] A privileged Zen/Firefox extension.
-  - [ ] An extension plus Native Messaging host.
-  - [ ] A hybrid in which BiDi handles pages and an extension supplies
-        Zen-specific Space metadata.
+      changes, tab movement, and Space changes. Navigation and cross-origin
+      process switches proven. Tab movement and Space changes still untested.
+- [x] Determine which lifecycle events exist for window, tab, navigation, crash,
+      and close events. `contextCreated`, `contextDestroyed`,
+      `navigationStarted`, `domContentLoaded`, `load`. **No selection event and
+      no selected-tab field exists**, so selected state must be modelled as
+      unknown rather than guessed.
+- [x] Test whether Zen exposes its Space IDs, names, order, and tab membership
+      through the remote protocol. **No, and worse.** `browser.getUserContexts`
+      returns only opaque per-session UUIDs, and `browsingContext.getTree`
+      enumerates through `gBrowser.tabs`, which Zen rewrote to return the
+      **active Space's tabs only**. BiDi cannot see, address, or reuse a tab in
+      a non-visible Space. Traced through the shipped `omni.ja` and confirmed
+      empirically on a two-Space throwaway profile.
+- [x] Test whether Firefox container identity is sufficient to infer Zen Space
+      membership. Sufficient **on disk** — each Space carries a `containerTabId`
+      matching a `containers.json` `userContextId`, and tabs agree. Not
+      sufficient over BiDi, whose container UUIDs are regenerated every restart
+      and carry no name or integer id. Essential tabs belong to no Space.
+- [x] Compare the viable transports:
+  - [x] WebDriver BiDi/Firefox Remote Agent. Proven for every page-level
+        operation; cannot see Zen Spaces or stable container identity.
+  - [x] CDP. **Ruled out.** Removed from Gecko entirely in Firefox 141; Zen 153
+        has no CDP and no pref brings it back.
+  - [x] A plain Zen/Firefox extension. **Ruled out.** It enumerates through the
+        same `gBrowser.tabs`, so `tabs.query({})` has the identical
+        active-Space-only blind spot, and `tabs.update({active:true})` on a
+        foreign-Space tab switches the visible Space.
+  - [x] A privileged `experiment_apis` extension. **Chosen** in ADR 0001 and
+        validated end to end: it loads on a stock release Zen, enumerates both
+        Spaces including lazy restored tabs, routes a background tab without
+        switching the visible Space, and shows no remote-control badge. Zen
+        ships `MOZ_REQUIRE_SIGNING: false`, so `extensions.experiments.enabled`
+        is a live pref and the parent script gets a system-principal sandbox
+        with `gZenWorkspaces.allStoredTabs` and `moveTabToWorkspace`.
+  - [x] An extension plus Native Messaging host. **Chosen.** A 35-second probe
+        proved an open native port keeps the MV3 event page alive past its idle
+        timeout with the same in-memory identity. A WebSocket is not a
+        substitute, and the default MV3 CSP silently upgrades `ws://` to
+        `wss://`.
+  - [x] A hybrid in which BiDi handles pages and a privileged extension supplies
+        Zen-specific Space metadata. Evaluated and deferred: BiDi remains worth
+        reconsidering for page interaction, but its permanent badge, launch
+        requirement, recommended-pref rewrite, and leaked-session failure make
+        it unsuitable for the primary transport.
 - [ ] Prove that the transport can list tabs without changing selected tab,
-      focused window, or visible Space.
-- [ ] Prove that it can open a background tab in a requested Space.
-- [ ] Prove that it can navigate an existing non-selected tab without selecting
+      focused window, or visible Space. Selected tab and visible Space are
+      proven unchanged. Focus needs a headed run.
+- [x] Prove that it can open a background tab in a requested Space. Done from
+      chrome JS: `gBrowser.addTab(url, { inBackground: true })` followed by
+      `gZenWorkspaces.moveTabToWorkspace(tab, uuid)`, with the visible Space and
+      selected tab unchanged. Not reachable over BiDi.
+- [x] Prove that it can navigate an existing non-selected tab without selecting
       it.
 - [ ] Prove that it can interact with a non-selected page while another tab
       continues playing media.
 - [ ] Capture repeatable before/after evidence for selected tab, focused window,
-      visible Space, and media playback.
+      visible Space, and media playback. The harness asserts a before/after
+      `document.visibilityState` map for every operation, with
+      `browsingContext.activate` as a positive control. Space and media evidence
+      still missing.
 - [ ] Document required Zen settings, command-line flags, profile changes,
-      extension permissions, and startup behavior.
-- [ ] Build a small repeatable transport harness in the repository.
-- [ ] Write an architecture decision record selecting the transport.
-- [ ] Define a fallback or stop condition if daily-use Zen cannot be attached
-      safely.
+      extension permissions, and startup behavior. Flags and startup documented;
+      extension permissions pending the extension evaluation.
+- [x] Build a small repeatable transport harness in the repository.
+      `npm run spike:transport`, skipped in CI unless `ZEN_SPIKE=1`.
+- [ ] Decide how the daemon survives a leaked BiDi session. Firefox permits one
+      session, and a client that disconnects without `session.end` strands it
+      permanently — only a browser restart clears it, which is the one thing
+      this product must not require.
+- [x] Write an architecture decision record selecting the transport.
+      [ADR 0001](../docs/adr/0001-browser-transport.md) selects a privileged
+      `experiment_apis` extension plus a native messaging host, with DevTools
+      RDP as the fallback. Status Accepted after the extension, cross-Space,
+      lazy-tab, no-badge, and native-port keepalive validations passed.
+- [x] Define a fallback or stop condition if daily-use Zen cannot be attached
+      safely. Recorded in ADR 0001: fall back to DevTools RDP, and if both that
+      and the extension become untenable, say plainly that Zen Agent cannot
+      safely drive a daily-use Zen rather than ship something that switches
+      Spaces or steals focus.
 - [ ] Do not copy code from `zen-mcp` unless its repository license and reuse
       terms are confirmed; use it only as conceptual reference until then.
 
@@ -390,13 +458,20 @@ The first usable release is complete only when all of the following are true:
 
 ## Open questions to resolve early
 
-- [ ] Can Zen's daily-use process be attached through BiDi after it has already
-      started?
-- [ ] Does Zen expose Space metadata to remote clients?
-- [ ] Are Zen Spaces represented by Firefox containers, Zen-only browser state,
-      or both?
-- [ ] Can all required page operations run against a non-selected tab?
-- [ ] Can screenshots be captured without selection or compositor side effects?
+- [x] Can Zen's daily-use process be attached through BiDi after it has already
+      started? **No.** Zen must be launched with `--remote-debugging-port`.
+- [x] Does Zen expose Space metadata to remote clients? **No.** Spaces are
+      chrome-level state; BiDi sees only containers, as opaque per-session
+      UUIDs.
+- [x] Are Zen Spaces represented by Firefox containers, Zen-only browser state,
+      or both? **Both.** A Space is Zen-only state (`uuid`, `name`, in
+      `zen-sessions.jsonlz4`) that optionally binds a container via
+      `containerTabId`. Essential tabs sit outside every Space.
+- [ ] Can all required page operations run against a non-selected tab? Navigate,
+      evaluate, type, and screenshot: yes. Background timer throttling applies,
+      so in-page polling is unreliable.
+- [x] Can screenshots be captured without selection or compositor side effects?
+      **Yes**, proven headless against a non-selected tab. Re-confirm headed.
 - [ ] Is a privileged extension or Native Messaging host unavoidable?
 - [ ] How should Space ambiguity be surfaced to terminal agents?
 - [ ] What is the smallest safe page-interaction surface for the first release?

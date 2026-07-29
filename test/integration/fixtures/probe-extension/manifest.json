@@ -1,0 +1,22 @@
+{
+  "manifest_version": 2,
+  "name": "Zen Agent Transport Probe",
+  "version": "0.0.1",
+  "description": "DEV-261: validates that a privileged extension can enumerate and route Zen Spaces without disturbing the browser.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "zen-agent-probe@zen-agent.local",
+      "strict_min_version": "128.0"
+    }
+  },
+  "experiment_apis": {
+    "zenProbe": {
+      "schema": "schema.json",
+      "parent": {
+        "scopes": ["addon_parent"],
+        "script": "api.js",
+        "events": ["startup"]
+      }
+    }
+  }
+}

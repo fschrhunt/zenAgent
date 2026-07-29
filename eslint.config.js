@@ -25,4 +25,26 @@ export default defineConfig(
       globals: globals.node,
     },
   },
+  {
+    // Browser-chrome code that runs inside Zen, not Node. Its globals are
+    // injected by Firefox's SchemaAPIManager sandbox.
+    files: ["test/integration/fixtures/**/*.js"],
+    languageOptions: {
+      globals: {
+        ExtensionAPI: "readonly",
+        IOUtils: "readonly",
+        Services: "readonly",
+        ChromeUtils: "readonly",
+        Cc: "readonly",
+        Ci: "readonly",
+        Cu: "readonly",
+        browser: "readonly",
+      },
+    },
+    rules: {
+      // The API class is consumed by reading it back off the sandbox global,
+      // so it has no in-file reference.
+      "no-unused-vars": "off",
+    },
+  },
 );
