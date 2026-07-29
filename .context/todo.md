@@ -148,9 +148,16 @@ proven items are re-runnable with `npm run spike:transport`.
       session, and a client that disconnects without `session.end` strands it
       permanently — only a browser restart clears it, which is the one thing
       this product must not require.
-- [ ] Write an architecture decision record selecting the transport.
-- [ ] Define a fallback or stop condition if daily-use Zen cannot be attached
-      safely.
+- [x] Write an architecture decision record selecting the transport.
+      [ADR 0001](../docs/adr/0001-browser-transport.md) selects a privileged
+      `experiment_apis` extension plus a native messaging host, with DevTools
+      RDP as the fallback. Status Proposed; five items must be validated before
+      it is Accepted.
+- [x] Define a fallback or stop condition if daily-use Zen cannot be attached
+      safely. Recorded in ADR 0001: fall back to DevTools RDP, and if both that
+      and the extension become untenable, say plainly that Zen Agent cannot
+      safely drive a daily-use Zen rather than ship something that switches
+      Spaces or steals focus.
 - [ ] Do not copy code from `zen-mcp` unless its repository license and reuse
       terms are confirmed; use it only as conceptual reference until then.
 

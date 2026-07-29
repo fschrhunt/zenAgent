@@ -89,8 +89,8 @@ foreign-Space tab switches the visible Space via Zen's patched `set selectedTab`
 `DevToolsStartup` handles forwarded command lines, so
 `zen --profile <same> --start-debugger-server <port>` starts a chrome-privileged
 server (`allowChromeProcess = true`) inside an already-running Zen, with no
-restart and no launch flag. Gated on `devtools.debugger.remote- enabled` and
-`devtools.chrome.enabled`, both read live.
+restart and no launch flag. Gated on two prefs, both read live:
+`devtools.debugger.remote-enabled` and `devtools.chrome.enabled`.
 
 It does **not** apply `RecommendedPreferences` — only BiDi, Marionette and the
 Remote Agent do — so it does not rewrite the profile. Its robot icon is
