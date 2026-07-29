@@ -68,7 +68,7 @@ describe.skipIf(!enabled || zen === undefined)(
     afterAll(async () => {
       // Always end the session. An abrupt disconnect leaks it permanently.
       await client?.close();
-      instance?.stop();
+      await instance?.stop();
     });
 
     const getTree = async (): Promise<readonly BrowsingContextInfo[]> =>

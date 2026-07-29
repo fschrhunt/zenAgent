@@ -59,7 +59,7 @@ export interface ScratchZen {
   readonly sessionUrl: string;
   readonly profileDir: string;
   readonly stderr: () => string;
-  readonly stop: () => void;
+  readonly stop: () => Promise<void>;
 }
 
 export interface LaunchOptions {
@@ -111,9 +111,27 @@ export async function launchScratchZen(
   child.stderr?.on("data", (chunk: string) => (stderr += chunk));
   child.stdout?.on("data", (chunk: string) => (stderr += chunk));
 
-  const stop = () => {
+  /**
+   * Shuts the instance down and then removes its profile.
+   *
+   * Order matters. Deleting the profile out from under a live Zen makes it exit
+   * uncleanly at best and hang at worst, and on macOS a Zen that does not
+   * quit cleanly can leave a stale tile in the Dock. Signal first, give it a
+   * moment to go, and only then delete.
+   */
+  const stop = async (): Promise<void> => {
+    if (child.exitCode === null) {
+      const exited = new Promise<void>((resolve) =>
+        child.once("exit", resolve),
+      );
+      child.kill("SIGTERM");
+      await Promise.race([
+        exited,
+        new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+      ]);
+      if (child.exitCode === null) child.kill("SIGKILL");
+    }
     rmSync(profileDir, { recursive: true, force: true });
-    if (child.exitCode === null) child.kill("SIGTERM");
   };
 
   const webSocketUrl = await new Promise<string>((resolve, reject) => {
@@ -135,8 +153,8 @@ export async function launchScratchZen(
         reject(new Error("timed out waiting for the BiDi banner"));
       }
     }, 100);
-  }).catch((error: unknown) => {
-    stop();
+  }).catch(async (error: unknown) => {
+    await stop();
     throw error;
   });
 
