@@ -38,6 +38,7 @@ export default defineConfig(
         Cc: "readonly",
         Ci: "readonly",
         Cu: "readonly",
+        browser: "readonly",
       },
     },
     rules: {

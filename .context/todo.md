@@ -101,14 +101,14 @@ proven items are re-runnable with `npm run spike:transport`.
       returns only opaque per-session UUIDs, and `browsingContext.getTree`
       enumerates through `gBrowser.tabs`, which Zen rewrote to return the
       **active Space's tabs only**. BiDi cannot see, address, or reuse a tab in
-      a non-visible Space. Traced through the shipped `omni.ja`; still needs
-      empirical confirmation on a two-Space profile.
+      a non-visible Space. Traced through the shipped `omni.ja` and confirmed
+      empirically on a two-Space throwaway profile.
 - [x] Test whether Firefox container identity is sufficient to infer Zen Space
       membership. Sufficient **on disk** — each Space carries a `containerTabId`
       matching a `containers.json` `userContextId`, and tabs agree. Not
       sufficient over BiDi, whose container UUIDs are regenerated every restart
       and carry no name or integer id. Essential tabs belong to no Space.
-- [ ] Compare the viable transports:
+- [x] Compare the viable transports:
   - [x] WebDriver BiDi/Firefox Remote Agent. Proven for every page-level
         operation; cannot see Zen Spaces or stable container identity.
   - [x] CDP. **Ruled out.** Removed from Gecko entirely in Firefox 141; Zen 153
@@ -124,14 +124,19 @@ proven items are re-runnable with `npm run spike:transport`.
         ships `MOZ_REQUIRE_SIGNING: false`, so `extensions.experiments.enabled`
         is a live pref and the parent script gets a system-principal sandbox
         with `gZenWorkspaces.allStoredTabs` and `moveTabToWorkspace`.
-  - [ ] An extension plus Native Messaging host. Note an open native port is the
-        only supported way to keep an MV3 event page alive; a WebSocket is not,
-        and the default MV3 CSP silently upgrades `ws://` to `wss://`.
-  - [ ] A hybrid in which BiDi handles pages and a privileged extension supplies
-        Zen-specific Space metadata. Current front-runner.
+  - [x] An extension plus Native Messaging host. **Chosen.** A 35-second probe
+        proved an open native port keeps the MV3 event page alive past its idle
+        timeout with the same in-memory identity. A WebSocket is not a
+        substitute, and the default MV3 CSP silently upgrades `ws://` to
+        `wss://`.
+  - [x] A hybrid in which BiDi handles pages and a privileged extension supplies
+        Zen-specific Space metadata. Evaluated and deferred: BiDi remains worth
+        reconsidering for page interaction, but its permanent badge, launch
+        requirement, recommended-pref rewrite, and leaked-session failure make
+        it unsuitable for the primary transport.
 - [ ] Prove that the transport can list tabs without changing selected tab,
-      focused window, or visible Space. Selected tab and focused window proven.
-      Visible Space needs a headed run.
+      focused window, or visible Space. Selected tab and visible Space are
+      proven unchanged. Focus needs a headed run.
 - [x] Prove that it can open a background tab in a requested Space. Done from
       chrome JS: `gBrowser.addTab(url, { inBackground: true })` followed by
       `gZenWorkspaces.moveTabToWorkspace(tab, uuid)`, with the visible Space and
@@ -157,8 +162,8 @@ proven items are re-runnable with `npm run spike:transport`.
 - [x] Write an architecture decision record selecting the transport.
       [ADR 0001](../docs/adr/0001-browser-transport.md) selects a privileged
       `experiment_apis` extension plus a native messaging host, with DevTools
-      RDP as the fallback. Status Proposed; five items must be validated before
-      it is Accepted.
+      RDP as the fallback. Status Accepted after the extension, cross-Space,
+      lazy-tab, no-badge, and native-port keepalive validations passed.
 - [x] Define a fallback or stop condition if daily-use Zen cannot be attached
       safely. Recorded in ADR 0001: fall back to DevTools RDP, and if both that
       and the extension become untenable, say plainly that Zen Agent cannot

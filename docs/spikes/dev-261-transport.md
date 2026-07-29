@@ -1,9 +1,9 @@
 # DEV-261: browser transport spike findings
 
-Status: in progress. Everything below marked **Proven** was observed directly on
-the machine and environment recorded here, and most of it is re-runnable with
-`npm run spike:transport`. Items marked **Open** still need a headed run against
-a profile that has real Zen Spaces.
+Status: complete for the transport decision. Everything below marked **Proven**
+was observed directly on the machine and environment recorded here, and most of
+it is re-runnable with `npm run spike:transport`. Headed focus and media
+regression tests remain as product follow-ups.
 
 ## Environment
 
@@ -17,8 +17,11 @@ a profile that has real Zen Spaces.
 
 The daily profile lives at
 `~/Library/Application Support/zen/Profiles/tddguwg7.Default (release)` and is
-the one used for all read-only profile inspection below. No spike step has
-written to it.
+the one used for the read-only profile inspection below. One consented BiDi
+attach test did write 87 recommended automation preferences and failed to
+restore five Personal tabs; section 10 records the preference impact. The
+preferences were removed with Zen closed and verified clean afterward. Every
+subsequent transport validation used throwaway profiles.
 
 ## 1. A running Zen cannot be attached to over BiDi — but can over DevTools RDP
 
@@ -538,12 +541,30 @@ Two honest gaps in this run: it was headless, so "focused window unchanged" was
 not meaningfully observable, and no media playback was exercised. Both belong in
 a headed run.
 
-## Open questions still to test
+## 14. A native port keeps the MV3 event page alive
 
-These need a **headed** run against a profile that has real Zen Spaces, which
-means restarting the user's daily Zen with `--remote-debugging-port`:
+**Proven**, and re-runnable with `npm run spike:transport`. A separate Manifest
+V3 extension opened a port with `runtime.connectNative`. Its temporary native
+host sent one message immediately, waited 35 seconds — beyond the event-page
+idle timeout — and sent a second.
 
-- **Confirm §1 empirically**, on a scratch profile first: does
+Both replies carried the same randomly generated in-memory token and the same
+event-page startup timestamp. That proves the page stayed alive; a terminated
+page would have disconnected the port and ended the native host instead.
+
+The test installs its uniquely named host manifest at Firefox's macOS user
+location, `~/Library/Application Support/Mozilla/NativeMessagingHosts/`, only
+for the duration of the run. It refuses to overwrite an existing manifest and
+removes the manifest, host, XPI, and throwaway profile in `finally`.
+
+This closes the last transport-critical validation in ADR 0001.
+
+## Product follow-ups
+
+These are useful headed regression tests, but no longer block the transport
+decision:
+
+- **Validate the RDP fallback**, on a scratch profile first: does
   `--start-debugger-server` forwarded into a running Zen open a privileged
   server, and does it raise the window on macOS?
 - Does macOS occlusion matter in practice? `RecomputeAppWindowVisibility`
@@ -558,10 +579,10 @@ means restarting the user's daily Zen with `--remote-debugging-port`:
 ## Reproducing
 
 ```sh
-npm run spike:transport              # headless, ~3s, launches a throwaway profile
+npm run spike:transport              # headless, ~65s, uses throwaway profiles
 ZEN_SPIKE_HEADED=1 npm run spike:transport
 ```
 
-The harness never touches the user's profile: it launches Zen with
-`--no-remote`, `MOZ_NO_REMOTE=1`, and a fresh `mkdtemp` profile, and always ends
+The repeatable harness never touches the user's profile: it launches Zen with
+`--no-remote`, `MOZ_NO_REMOTE=1`, and fresh `mkdtemp` profiles, and always ends
 the BiDi session. It is skipped by `npm test` and CI unless `ZEN_SPIKE=1`.

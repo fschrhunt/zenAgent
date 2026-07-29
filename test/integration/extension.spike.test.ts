@@ -23,6 +23,7 @@ import {
   runExtensionProbeAcrossRestart,
   type ProbeSnapshot,
 } from "./probe-extension.js";
+import { runNativeKeepaliveProbe } from "./native-keepalive.js";
 import { locateZen } from "./zen.js";
 
 const enabled = process.env["ZEN_SPIKE"] === "1";
@@ -75,5 +76,19 @@ describe.skipIf(!enabled || zen === undefined)(
       expect(spacesIn(after.allStoredBySpace).size).toBeGreaterThan(1);
       expect(after.remoteControlBadge).toBe(false);
     }, 300_000);
+
+    it("keeps an MV3 event page alive through an open native port", async () => {
+      if (zen === undefined) throw new Error("Zen not found");
+      const { result } = await runNativeKeepaliveProbe(zen, {
+        timeoutMs: 90_000,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.idleWaitMs).toBeGreaterThan(30_000);
+      expect(result.elapsedMs).toBeGreaterThan(30_000);
+      expect(result.sameEventPage).toBe(true);
+      expect(result.first.token).toBe(result.second.token);
+      expect(result.first.startedAt).toBe(result.second.startedAt);
+    }, 120_000);
   },
 );

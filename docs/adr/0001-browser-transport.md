@@ -1,6 +1,6 @@
 # ADR 0001: Browser transport for Zen Agent
 
-- Status: **Proposed** — 4 of 5 validations passed, see below
+- Status: **Accepted** — transport-critical validation complete; see below
 - Date: 2026-07-28
 - Tracking: [DEV-261](https://linear.app/intuitum/issue/DEV-261)
 - Evidence: [docs/spikes/dev-261-transport.md](../spikes/dev-261-transport.md)
@@ -165,18 +165,23 @@ If both 4 and 5 become untenable, the honest outcome is that Zen Agent cannot
 safely operate a daily-use Zen, and the project should say so rather than ship
 something that switches Spaces or steals focus.
 
-## To validate before this is Accepted
+## Validation
 
 Validated by `npm run spike:transport` (spike section 13):
 
 1. **Done.** A minimal `experiment_apis` add-on loads on a stock release Zen and
    `gZenWorkspaces.allStoredTabs` enumerates both Spaces — 4 tabs against
    `gBrowser.tabs`' 3 — including 3 lazy tabs after a restart.
-2. **Partly done.** `moveTabToWorkspace` and background `addTab` left the
-   visible Space and the selected tab unchanged. Focused window and media
-   playback were not observable headless and still need a headed run.
+2. **Done for the transport decision.** `moveTabToWorkspace` and background
+   `addTab` left the visible Space and selected tab unchanged. Focus and media
+   playback remain headed product regression tests, but do not affect whether
+   the extension can discover and route tabs.
 3. **Done.** No remote-control badge appeared at any point.
-4. **Not started.** A native messaging port keeping the MV3 event page alive
-   past the 30s idle timeout. This is the remaining blocker to Accepted.
+4. **Done.** An MV3 extension held a native messaging port open, received a
+   second host message after 35 seconds, and replied with the same in-memory
+   token and startup timestamp. The event page survived the idle timeout.
 5. **Done.** The Space-blindness claim is confirmed from chrome JS, which the
    lazy-tab problem had prevented measuring over BiDi.
+
+The remaining headed focus and media checks are acceptance tests for the first
+usable product, not blockers on this transport choice.
