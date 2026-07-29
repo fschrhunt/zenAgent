@@ -35,8 +35,15 @@ background.
 
 ## Status
 
-**Early.** The repository currently holds the project foundation and automation.
-The browser transport and tab routing come next.
+**Early, but the hard part works.** The browser model and the transport that
+feeds it are implemented, tested, and proven against a real Zen: Zen Agent can
+enumerate tabs in Spaces you are not looking at, open a background tab in a
+Space you name, and move a tab between Spaces — without changing your selected
+tab, taking focus, or interrupting audio that is already playing. The
+[transport notes](docs/transport.md#proven) hold the evidence.
+
+Not usable yet: there is no daemon, no routing policy, no CLI, and no MCP
+server. Those come next.
 
 ## Getting started
 

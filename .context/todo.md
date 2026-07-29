@@ -30,15 +30,14 @@ Every implementation phase must preserve these invariants:
 
 - [x] Review and merge [PR #1](https://github.com/fschrhunt/zen-agent/pull/1).
       Merged 2026-07-28, along with Dependabot PRs #2-#4 and the todo in #5.
-- [ ] Confirm the CI and Dependency audit checks remain required and green on
+- [x] Confirm the CI and Dependency audit checks remain required and green on
       `main`. Both went red on 2026-07-28: PR #4 took TypeScript 7, which falls
       outside `typescript-eslint`'s `typescript >=4.8.4 <6.1.0` peer range, so
       `npm ci` fails with `ERESOLVE` before any check runs. The pin is back at
       `^6.0.3` and TypeScript majors are ignored in Dependabot until
-      `typescript-eslint` ships a stable release that widens the range. All
-      three checks pass on
-      [PR #6](https://github.com/fschrhunt/zen-agent/pull/6); this item stays
-      open until that merges and `main` itself is green again.
+      `typescript-eslint` ships a stable release that widens the range. PR #6
+      merged and `main` has been green on every push since, through PR #9.
+      Revisit the TypeScript pin when `typescript-eslint` widens its range.
 - [x] Configure branch protection or a ruleset for `main` after the first PR is
       merged. The active `main` ruleset (2026-07-28) requires a pull request and
       the `Quality / Node 24`, `Lint workflows`, and `Audit dependencies`
@@ -54,8 +53,9 @@ Every implementation phase must preserve these invariants:
       chosen 2026-07-28 so the project can be forked, used, and contributed to
       freely. This unblocks reuse from `zen-mcp` in section 1 on our side; that
       repository's own license still has to be confirmed separately.
-- [ ] Add an `AGENTS.md` with repository-specific build, safety, and testing
-      rules once the architecture is proven.
+- [x] Add an `AGENTS.md` with repository-specific build, safety, and testing
+      rules once the architecture is proven. Added 2026-07-28, after ADR 0001
+      was accepted.
 - [x] Add workflow linting so invalid GitHub Actions expressions are caught
       before push. `actionlint` runs as the CI `Lint workflows` job.
 
@@ -66,6 +66,12 @@ Tracking: [DEV-261](https://linear.app/intuitum/issue/DEV-261)
 Findings are written up in
 [docs/spikes/dev-261-transport.md](../docs/spikes/dev-261-transport.md), and the
 proven items are re-runnable with `npm run spike:transport`.
+
+The spike is closed and [ADR 0001](../docs/adr/0001-browser-transport.md) is
+accepted. Items that needed a live transport rather than another spike were
+finished under [DEV-273](https://linear.app/intuitum/issue/DEV-273) in section 3
+and are marked accordingly; the evidence is in
+[docs/transport.md](../docs/transport.md).
 
 - [x] Record the exact Zen Browser version, Firefox version, macOS version, and
       active profile layout used for the spike. Zen 1.21.9b / Gecko 153.0 /
@@ -88,9 +94,12 @@ proven items are re-runnable with `npm run spike:transport`.
 - [x] Determine whether BiDi can create, navigate, inspect, and interact with a
       background browsing context without activating it. Yes, including
       `input.performActions` and `captureScreenshot`.
-- [ ] Determine whether stable browsing-context IDs survive navigation, process
-      changes, tab movement, and Space changes. Navigation and cross-origin
-      process switches proven. Tab movement and Space changes still untested.
+- [x] Determine whether stable browsing-context IDs survive navigation, process
+      changes, tab movement, and Space changes. For BiDi: navigation and
+      cross-origin process switches proven. For the transport actually chosen,
+      **all four are proven** — identity is a `WeakMap` keyed on the tab
+      element, and a Space move is a DOM move of that element. Confirmed headed
+      under DEV-273.
 - [x] Determine which lifecycle events exist for window, tab, navigation, crash,
       and close events. `contextCreated`, `contextDestroyed`,
       `navigationStarted`, `domContentLoaded`, `load`. **No selection event and
@@ -134,31 +143,36 @@ proven items are re-runnable with `npm run spike:transport`.
         reconsidering for page interaction, but its permanent badge, launch
         requirement, recommended-pref rewrite, and leaked-session failure make
         it unsuitable for the primary transport.
-- [ ] Prove that the transport can list tabs without changing selected tab,
-      focused window, or visible Space. Selected tab and visible Space are
-      proven unchanged. Focus needs a headed run.
+- [x] Prove that the transport can list tabs without changing selected tab,
+      focused window, or visible Space. **All three proven headed** under
+      DEV-273, with focus checked against the frontmost macOS application as
+      well as the model's own field.
 - [x] Prove that it can open a background tab in a requested Space. Done from
       chrome JS: `gBrowser.addTab(url, { inBackground: true })` followed by
       `gZenWorkspaces.moveTabToWorkspace(tab, uuid)`, with the visible Space and
       selected tab unchanged. Not reachable over BiDi.
 - [x] Prove that it can navigate an existing non-selected tab without selecting
       it.
-- [ ] Prove that it can interact with a non-selected page while another tab
-      continues playing media.
-- [ ] Capture repeatable before/after evidence for selected tab, focused window,
-      visible Space, and media playback. The harness asserts a before/after
-      `document.visibilityState` map for every operation, with
-      `browsingContext.activate` as a positive control. Space and media evidence
-      still missing.
-- [ ] Document required Zen settings, command-line flags, profile changes,
-      extension permissions, and startup behavior. Flags and startup documented;
-      extension permissions pending the extension evaluation.
+- [x] Prove that it can interact with a non-selected page while another tab
+      continues playing media. Proven headed: opening, navigating, and closing
+      background tabs while the selected tab played audio left playback
+      advancing and never rewound.
+- [x] Capture repeatable before/after evidence for selected tab, focused window,
+      visible Space, and media playback. `npm run spike:transport` now asserts
+      all four, green on three consecutive runs. Media is measured from the
+      page's reported playback position rather than the tab's `soundPlaying`
+      flag, which proved to depend on window occlusion.
+- [x] Document required Zen settings, command-line flags, profile changes,
+      extension permissions, and startup behavior.
+      [docs/transport.md](../docs/transport.md) covers the two required
+      preferences, the host manifest location, and the `nativeMessaging`
+      permission.
 - [x] Build a small repeatable transport harness in the repository.
       `npm run spike:transport`, skipped in CI unless `ZEN_SPIKE=1`.
-- [ ] Decide how the daemon survives a leaked BiDi session. Firefox permits one
-      session, and a client that disconnects without `session.end` strands it
-      permanently — only a browser restart clears it, which is the one thing
-      this product must not require.
+- [x] Decide how the daemon survives a leaked BiDi session. **Moot.** ADR 0001
+      rejected BiDi as the transport, so no BiDi session is ever opened and
+      there is nothing to leak. Reinstate this item only if BiDi returns for
+      page-level interaction.
 - [x] Write an architecture decision record selecting the transport.
       [ADR 0001](../docs/adr/0001-browser-transport.md) selects a privileged
       `experiment_apis` extension plus a native messaging host, with DevTools
@@ -174,7 +188,9 @@ proven items are re-runnable with `npm run spike:transport`.
 
 ## 2. Define the browser and Space model
 
-Tracking: [DEV-262](https://linear.app/intuitum/issue/DEV-262)
+Tracking: [DEV-262](https://linear.app/intuitum/issue/DEV-262) — **Done**, in
+[PR #9](https://github.com/fschrhunt/zen-agent/pull/9). The model is specified
+in [docs/browser-model.md](../docs/browser-model.md) at schema version 1.
 
 - [x] Define types for browser sessions, profiles, windows, Spaces, tabs,
       browsing contexts, frames, and elements.
@@ -197,7 +213,102 @@ Tracking: [DEV-262](https://linear.app/intuitum/issue/DEV-262)
 - [x] Add unit tests for identity, lifecycle transitions, stale IDs, multiple
       windows, and incomplete transport data.
 
-## 3. Implement configuration and Personal/Work routing
+## 3. Implement the Zen transport
+
+Tracking: [DEV-273](https://linear.app/intuitum/issue/DEV-273)
+
+Section 2 shipped a registry with no producer. This section builds the transport
+[ADR 0001](../docs/adr/0001-browser-transport.md) selected, so the model is fed
+by a real browser instead of fixtures.
+
+### The extension
+
+- [x] Promote the spike probe into a real `extension/` package rather than
+      leaving it in `test/integration/fixtures/`. `extension/manifest.json`,
+      `background.js`, and `api/parent.js`.
+- [x] Detect `gZenWorkspaces.allStoredTabs`, `moveTabToWorkspace`, and the
+      `zen-workspace-id` attribute at startup, and report an explicit
+      unsupported-capability error instead of calling optimistically. The probe
+      is in `capabilities()`; the refusal is unit-tested on the host side and
+      names the Zen version. The probe itself still needs a headed run.
+- [ ] Record the Zen versions the capability probe has actually passed on, and
+      fail closed on versions it has not. Zen 1.21.9b / Gecko 153.0 now passes
+      all eight capabilities; the version gate itself is not written yet.
+- [x] Keep an MV3 background event page holding one native messaging port open,
+      since that is the only supported way to keep it alive. **Proven.** Zen
+      loads a single MV3 add-on that also declares `experiment_apis` — the
+      combination DEV-261 had only tested in halves — and the port drove the
+      full scenario.
+- [x] Request the narrowest permission set that works. `nativeMessaging` only,
+      plus the `experiment_apis` key the privileged API requires.
+
+### The native messaging host
+
+- [x] Implement the host with Firefox's framing: a little-endian `uint32` length
+      prefix followed by that many bytes of UTF-8 JSON, on stdin and stdout.
+      `src/transport/framing.ts`, with byte-length and split-frame tests.
+- [x] Never write anything but framed messages to stdout; diagnostics go to
+      stderr or a log file. Verified by driving the built binary end to end.
+- [ ] Install the host manifest to
+      `~/Library/Application Support/Mozilla/NativeMessagingHosts/`, not the
+      `.../Zen/` path some third-party installers guess. The path and contents
+      are implemented and tested in `src/native/manifest.ts`, and the headed
+      proof confirms Zen launches a host registered there. No installer writes
+      it for a real user yet.
+- [x] Restrict `allowed_extensions` to the add-on's own ID.
+- [x] Chunk any payload approaching the 1 MiB host-to-browser cap, and reject
+      anything above a configured ceiling rather than truncating it. Note the
+      cap applies host to browser only, so it constrains requests rather than
+      snapshots; ADR 0001 implied the opposite and has been corrected.
+
+### The wire protocol
+
+- [x] Define a versioned request, response, event, and error schema, and refuse
+      a mismatched protocol version with a clear message.
+- [x] Correlate every request with an ID so concurrent calls cannot be confused.
+- [x] Keep page content, URLs, and titles out of logs by default. The host logs
+      counts; the client does not surface raw event payloads on the error path.
+
+### Feeding the model
+
+- [x] Emit `BrowserSnapshot` and `BrowserDelta` values `BrowserRegistry`
+      accepts, at schema version 1.
+- [x] Map Space UUIDs, container identity, essential tabs, and lazy tabs into
+      the model, marking anything unavailable as `unknown` or `unsupported`.
+- [x] Issue a new session identity on reconnect and stale the previous one with
+      `session-replaced`.
+- [x] **Determine whether stable tab IDs survive tab movement and Space
+      changes.** **Proven.** Identity is a `WeakMap` keyed on the tab element,
+      and moving a tab between Spaces is a DOM move of that same element, so the
+      identifier is unchanged — confirmed headed, along with every identifier
+      from the first snapshot still resolving afterwards. Nothing is written to
+      the profile to obtain identity. The identity contract in
+      `docs/browser-model.md` stands.
+
+### Evidence
+
+- [x] Add contract tests that run without Zen installed, covering framing,
+      chunking, protocol versioning, capability refusal, snapshot translation,
+      the client, the host manifest, and the host's own connect-and-reconcile
+      loop driven by a scripted browser over real frames.
+- [x] Add a headed integration test behind `ZEN_SPIKE=1` that asserts selected
+      tab, focused window, visible Space, and media playback are unchanged.
+      `test/integration/transport.proof.test.ts`, green on three consecutive
+      runs. Focus is checked against the frontmost macOS application as well as
+      the model's own field, and playback is measured from the page's reported
+      position rather than the tab's `soundPlaying` flag, which proved to depend
+      on window occlusion.
+- [x] Document the required Zen settings, profile changes, and extension
+      permissions, including that an unsigned privileged add-on means either
+      `xpinstall.signatures.required = false` or reloading from
+      `about:debugging` on every restart. Say so plainly; do not bury it.
+      [docs/transport.md](../docs/transport.md).
+
+## 4. Implement configuration and Personal/Work routing
+
+Tracking: [DEV-274](https://linear.app/intuitum/issue/DEV-274), split out of
+DEV-262. This section needs no browser, so it can proceed in parallel with
+section 3.
 
 - [ ] Choose a versioned local configuration format and path.
 - [ ] Add schema validation with actionable error messages.
@@ -222,7 +333,7 @@ Tracking: [DEV-262](https://linear.app/intuitum/issue/DEV-262)
 - [ ] Add unit tests for Personal, Work, named Space, explicit override,
       conflicts, missing mappings, and safe-default behavior.
 
-## 4. Implement tab discovery and resolution
+## 5. Implement tab discovery and resolution
 
 - [ ] Normalize URLs for comparison without discarding security-relevant
       components.
@@ -244,7 +355,7 @@ Tracking: [DEV-262](https://linear.app/intuitum/issue/DEV-262)
       between resolution and action.
 - [ ] Add race tests for simultaneous resolve/open requests.
 
-## 5. Build the shared local daemon
+## 6. Build the shared local daemon
 
 Tracking: [DEV-263](https://linear.app/intuitum/issue/DEV-263)
 
@@ -270,7 +381,7 @@ Tracking: [DEV-263](https://linear.app/intuitum/issue/DEV-263)
 - [ ] Add unit, protocol-contract, reconnect, concurrency, and crash-recovery
       tests.
 
-## 6. Implement the terminal CLI
+## 7. Implement the terminal CLI
 
 Tracking: [DEV-265](https://linear.app/intuitum/issue/DEV-265)
 
@@ -295,7 +406,7 @@ Tracking: [DEV-265](https://linear.app/intuitum/issue/DEV-265)
 - [ ] Ensure all CLI operations go through the daemon.
 - [ ] Add CLI unit, snapshot, daemon-boundary, and exit-code tests.
 
-## 7. Implement background-safe page interaction
+## 8. Implement background-safe page interaction
 
 Tab management alone is not enough for agents to complete browser tasks.
 
@@ -326,7 +437,7 @@ Tab management alone is not enough for agents to complete browser tasks.
 - [ ] Test dynamic applications, shadow DOM, iframes, redirects, dialogs,
       downloads, stale elements, and background execution.
 
-## 8. Expose the daemon through MCP
+## 9. Expose the daemon through MCP
 
 Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 
@@ -348,7 +459,7 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
       malformed input, daemon errors, and shutdown.
 - [ ] Document configuration for Codex and other MCP-compatible terminal agents.
 
-## 9. Multi-agent correctness
+## 10. Multi-agent correctness
 
 - [ ] Define ownership and lease behavior for concurrent work on the same tab.
 - [ ] Decide whether reads can occur while another client mutates a tab.
@@ -360,7 +471,7 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 - [ ] Make safe retries idempotent.
 - [ ] Add load and race tests with multiple CLI and MCP clients.
 
-## 10. Security and privacy hardening
+## 11. Security and privacy hardening
 
 - [ ] Write a threat model covering local clients, malicious pages, compromised
       dependencies, remote-protocol exposure, extensions, and Native Messaging.
@@ -383,7 +494,7 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 - [ ] Document that website-level destructive actions follow the calling agent's
       policy; Zen Agent itself does not add a redundant allow prompt.
 
-## 11. Testing and safety verification
+## 12. Testing and safety verification
 
 - [ ] Set a coverage target for policy, resolver, daemon, CLI, and MCP code.
 - [ ] Add fixture sites for forms, navigation, frames, dialogs, downloads, and
@@ -404,7 +515,7 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 - [ ] Keep environment-dependent Zen tests separate from portable unit/contract
       CI.
 
-## 12. Documentation and diagnostics
+## 13. Documentation and diagnostics
 
 - [ ] Document Zen configuration and startup requirements.
 - [ ] Document how to identify and map Personal and Work Spaces.
@@ -420,7 +531,7 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 - [ ] Maintain a supported Zen/Firefox/macOS compatibility matrix.
 - [ ] Add architecture diagrams and decision records.
 
-## 13. Packaging and release readiness
+## 14. Packaging and release readiness
 
 - [ ] Decide whether to publish to npm, distribute a standalone binary, provide
       a Homebrew formula, or use a combination.
@@ -473,7 +584,10 @@ The first usable release is complete only when all of the following are true:
       so in-page polling is unreliable.
 - [x] Can screenshots be captured without selection or compositor side effects?
       **Yes**, proven headless against a non-selected tab. Re-confirm headed.
-- [ ] Is a privileged extension or Native Messaging host unavoidable?
+- [x] Is a privileged extension or Native Messaging host unavoidable? **Yes,
+      both.** Nothing else can see a non-visible Space, and a native port is the
+      only supported way to keep an MV3 event page alive. Both are now proven
+      working together in a single add-on.
 - [ ] How should Space ambiguity be surfaced to terminal agents?
 - [ ] What is the smallest safe page-interaction surface for the first release?
 - [ ] Which Zen, Firefox, macOS, and Node versions will be supported initially?

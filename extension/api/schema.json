@@ -1,0 +1,80 @@
+[
+  {
+    "namespace": "zenAgent",
+    "description": "Privileged access to Zen's Space and tab internals.",
+    "functions": [
+      {
+        "name": "describe",
+        "type": "function",
+        "async": true,
+        "description": "Report versions and which Zen internals this build actually exposes.",
+        "parameters": []
+      },
+      {
+        "name": "snapshot",
+        "type": "function",
+        "async": true,
+        "description": "Enumerate every window, Space, and tab, including tabs in Spaces that are not visible and tabs that have not been loaded.",
+        "parameters": []
+      },
+      {
+        "name": "openTab",
+        "type": "function",
+        "async": true,
+        "description": "Open a tab in the background, optionally routed into an explicit Space. Never selects the tab or switches the visible Space.",
+        "parameters": [
+          {
+            "name": "options",
+            "type": "object",
+            "properties": {
+              "url": { "type": "string" },
+              "windowId": { "type": "string", "optional": true },
+              "zenSpaceUuid": { "type": "string", "optional": true }
+            }
+          }
+        ]
+      },
+      {
+        "name": "moveTab",
+        "type": "function",
+        "async": true,
+        "description": "Route an existing tab into an explicit Space. Preserves the tab's identifier and does not switch the visible Space.",
+        "parameters": [
+          { "name": "tabId", "type": "string" },
+          { "name": "zenSpaceUuid", "type": "string" }
+        ]
+      },
+      {
+        "name": "navigateTab",
+        "type": "function",
+        "async": true,
+        "description": "Navigate the tab with this identifier. Does not select it.",
+        "parameters": [
+          { "name": "tabId", "type": "string" },
+          { "name": "url", "type": "string" }
+        ]
+      },
+      {
+        "name": "closeTab",
+        "type": "function",
+        "async": true,
+        "description": "Close the tab with this identifier.",
+        "parameters": [{ "name": "tabId", "type": "string" }]
+      }
+    ],
+    "events": [
+      {
+        "name": "onChanged",
+        "type": "function",
+        "description": "Fires when tabs change. Advisory only: a client that misses one must reconcile with a fresh snapshot.",
+        "parameters": [
+          {
+            "name": "change",
+            "type": "object",
+            "additionalProperties": true
+          }
+        ]
+      }
+    ]
+  }
+]
