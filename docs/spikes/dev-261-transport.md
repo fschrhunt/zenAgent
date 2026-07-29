@@ -379,16 +379,18 @@ second channel, and they are not equivalent:
 | Sees lazy/unloaded tabs (§11)   | yes, reads the tab strip     | yes                              |
 | Needs an add-on                 | yes, unsigned + privileged   | **no**                           |
 | Needs signature enforcement off | yes, or reload every restart | no                               |
-| Rewrites 87 prefs (§10)         | **no**                       | yes, unless opted out            |
-| Robot icon in the URL bar (§12) | **no**                       | **yes, permanently**             |
+| Rewrites 87 prefs (§10)         | **no**                       | **no** (agent-only, not RDP)     |
+| Robot icon in the URL bar (§12) | **no**                       | yes, but clearable on disconnect |
 | Attach to a running session     | n/a                          | yes, no restart                  |
 | Protocol stability              | `experiment_apis`, unstable  | legacy RDP, unstable             |
 | Known focus cost                | none                         | one window raise per browser run |
 
-The balance moved. RDP looked cheaper on setup, but it inherits every cost of
-being a remote protocol: the preference rewriting in section 10, the permanent
-robot icon in section 12, and the window raise. The extension has a heavier
-install story and nothing else against it.
+Correction to an earlier draft: only BiDi, Marionette and the Remote Agent call
+`RecommendedPreferences.applyPreferences()`. The DevTools RDP path does **not**
+rewrite preferences, and its badge is clearable because `DevToolsSocketStatus`
+counts listeners and `SocketListener.close()` decrements it. RDP is therefore a
+genuine contender, and is recorded as the fallback in
+[ADR 0001](../adr/0001-browser-transport.md).
 
 The shape is now: **BiDi cannot be the discovery layer at all** (section 11),
 and the remaining question is which chrome-privileged channel replaces it.
@@ -488,8 +490,18 @@ long as Zen Agent is connected. For a tool whose entire premise is not
 disturbing the browser you are already using, that is a real cost, and it cannot
 be engineered away.
 
-**A WebExtension does not trigger it.** `gRemoteControl` never consults the
-add-on manager.
+How long it stays up differs by transport, and that matters:
+
+- **BiDi**: `RemoteAgent.running` is
+  `!!this.#server && !this.#server.isStopped()` — the listener, not a
+  connection. Armed at startup and unstoppable, so the badge is shown for the
+  **entire browser run**, connected or not.
+- **DevTools RDP**: `DevToolsSocketStatus` counts listeners via
+  `notifySocketOpened`/`notifySocketClosed`, called from `SocketListener.open()`
+  and `.close()`. Closing the listener clears the badge, so it can be scoped to
+  "while the agent is actually attached".
+- **WebExtension**: never appears. `gRemoteControl` does not consult the add-on
+  manager.
 
 ## Open questions still to test
 
