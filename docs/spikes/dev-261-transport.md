@@ -376,19 +376,22 @@ second channel, and they are not equivalent:
 |                                 | Privileged extension         | DevTools RDP (§1)                |
 | ------------------------------- | ---------------------------- | -------------------------------- |
 | Reaches `gZenWorkspaces`        | yes                          | yes                              |
+| Sees lazy/unloaded tabs (§11)   | yes, reads the tab strip     | yes                              |
 | Needs an add-on                 | yes, unsigned + privileged   | **no**                           |
 | Needs signature enforcement off | yes, or reload every restart | no                               |
-| Setup                           | install add-on, flip 2 prefs | flip 2 prefs, restart once       |
+| Rewrites 87 prefs (§10)         | **no**                       | yes, unless opted out            |
+| Robot icon in the URL bar (§12) | **no**                       | **yes, permanently**             |
 | Attach to a running session     | n/a                          | yes, no restart                  |
 | Protocol stability              | `experiment_apis`, unstable  | legacy RDP, unstable             |
 | Known focus cost                | none                         | one window raise per browser run |
 
-The RDP path is the cheaper of the two — no add-on, no signing changes, and it
-solves §1 and §8 with the same mechanism. Its unknown is the macOS window raise.
-The extension path has no focus cost but a much heavier install story.
+The balance moved. RDP looked cheaper on setup, but it inherits every cost of
+being a remote protocol: the preference rewriting in section 10, the permanent
+robot icon in section 12, and the window raise. The extension has a heavier
+install story and nothing else against it.
 
-Either way the shape is the same: **BiDi cannot be the only transport**, and the
-second channel must be chrome-privileged.
+The shape is now: **BiDi cannot be the discovery layer at all** (section 11),
+and the remaining question is which chrome-privileged channel replaces it.
 
 ## 10. Attaching to a real profile rewrites 87 preferences
 
@@ -455,6 +458,38 @@ discovery: **a transport that cannot see 21 of 22 tabs after a browser restart
 cannot support "discover before you open" or "reuse by stable id"**, which are
 the first two product principles. Loading every tab to make it visible is not an
 option; it would defeat the purpose.
+
+## 12. The remote-control robot icon cannot be hidden
+
+**Proven, from the shipped `browser/content/browser/browser.js`, and spotted by
+the user in their own window.** While anything is attached, Zen shows a robot
+icon in the URL bar:
+
+```js
+getRemoteControlComponent() {
+  if (DevToolsSocketStatus.hasSocketOpened({ excludeBrowserToolboxSockets: true })) {
+    return "DevTools";
+  }
+  if (Marionette.running) { return "Marionette"; }
+  if (RemoteAgent.running) { return "RemoteAgent"; }
+  return null;
+}
+```
+
+Any of the three lights it up, so **BiDi, the DevTools RDP path from section 1,
+and Marionette all trigger it equally.** There is a pref that suppresses it,
+`browser.chrome.disableRemoteControlCueForTests`, but the guard is
+`if (disableRemoteControlCue && Cu.isInAutomation)` — the pref does nothing
+unless the build is in automation, which a normal Zen is not. It is an
+anti-phishing signal, deliberately not user-disableable.
+
+So every remote-protocol transport carries a permanent, visible UI change for as
+long as Zen Agent is connected. For a tool whose entire premise is not
+disturbing the browser you are already using, that is a real cost, and it cannot
+be engineered away.
+
+**A WebExtension does not trigger it.** `gRemoteControl` never consults the
+add-on manager.
 
 ## Open questions still to test
 
