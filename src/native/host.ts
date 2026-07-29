@@ -6,9 +6,9 @@
  * keeps the extension's event page alive — and maintains a registry of what the
  * browser currently contains.
  *
- * It does not yet serve terminal clients. DEV-263 adds the Unix socket that the
- * CLI and MCP server share; until then this is the end-to-end proof that the
- * extension, the protocol, and the model fit together against a real Zen.
+ * This smaller host remains the end-to-end proof that the extension, protocol,
+ * and model fit together against a real Zen. Production uses daemon-host.ts,
+ * which also publishes the socket used by the setup CLI and MCP server.
  */
 
 import type { Readable, Writable } from "node:stream";

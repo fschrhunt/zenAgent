@@ -18,6 +18,8 @@ passes:
 - **Look before you open.** Discover windows, Spaces, and tabs before deciding
   to create one.
 - **Address tabs by stable ID**, never by whichever tab happens to be active.
+- **Keep browser policy in one shared daemon.** MCP is the browser automation
+  surface; the CLI is limited to setup, configuration, and diagnostics.
 - **Fail loudly on ambiguity.** Return an explicit ambiguity or
   unsupported-capability error rather than falling back to something that might
   disturb the browser.
@@ -45,7 +47,7 @@ npm run build          # tsc to dist/
 | ------------------------- | -------------------------------------------------------- |
 | `src/browser/model.ts`    | Identities, observations, snapshot and delta schemas     |
 | `src/browser/registry.ts` | The live registry, stale-ID rules, lifecycle transitions |
-| `src/cli/`                | Terminal interface; all operations go through the daemon |
+| `src/cli/`                | Setup wizard and agent command backplane                 |
 | `docs/adr/`               | Decision records — add one for any architectural choice  |
 | `docs/spikes/`            | Spike findings, with evidence                            |
 | `test/integration/`       | Requires a real Zen; skipped unless `ZEN_SPIKE=1`        |

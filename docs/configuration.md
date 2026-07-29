@@ -19,11 +19,15 @@ attention.
 ## First-run bootstrap
 
 Zen launches one native-host daemon per active profile. Before a configuration
-exists, the CLI may discover the socket only when exactly one profile daemon is
-active. It refuses `ambiguous-profile` when several are present instead of
-choosing the focused, newest, or visually active browser.
+exists, the setup wizard may discover the socket only when exactly one profile
+daemon is active. It refuses `ambiguous-profile` when several are present
+instead of choosing the focused, newest, or visually active browser.
 
-With one active profile, list its Spaces first:
+With one active profile, run `zen-agent`, choose **Configure Spaces**, and
+select Personal and Work using the arrow keys. The wizard validates the selected
+session-scoped IDs and preserves routing rules and named aliases.
+
+Agents and scripts can perform the same setup explicitly. List Spaces first:
 
 ```sh
 zen-agent spaces list

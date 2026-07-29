@@ -1,7 +1,7 @@
 {
   "name": "zen-agent",
   "version": "0.1.0",
-  "description": "A considerate, space-aware CLI and MCP server for background automation in Zen Browser.",
+  "description": "A considerate, space-aware MCP server for background automation in Zen Browser, with a guided setup wizard.",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -37,7 +37,11 @@
     "dist",
     "extension"
   ],
-  "bundleDependencies": true,
+  "bundleDependencies": [
+    "@clack/core",
+    "@modelcontextprotocol/sdk",
+    "zod"
+  ],
   "engines": {
     "node": ">=24",
     "npm": ">=11"
@@ -71,6 +75,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@clack/core": "1.4.3",
     "@modelcontextprotocol/sdk": "1.30.0",
     "zod": "4.4.3"
   },

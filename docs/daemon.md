@@ -14,7 +14,7 @@ native-host daemon
     ├── serialized mutation queue
     └── owner-only Unix socket
              ▲
-             ├── zen-agent CLI
+             ├── zen-agent setup CLI
              └── zen-agent-mcp
 ```
 
@@ -32,8 +32,8 @@ and would create a second, unauthoritative transport owner.
    refuses a configuration targeting another profile.
 4. It acquires an exclusive per-profile lock and publishes the per-profile
    socket.
-5. CLI and MCP clients use the configured profile, or discover the socket when
-   exactly one profile daemon is active.
+5. Setup CLI and MCP clients use the configured profile, or discover the socket
+   when exactly one profile daemon is active.
 6. When Zen closes the native port, the process closes clients, removes its
    socket and lock, and exits. The extension reconnect loop can launch a
    replacement host.
@@ -90,8 +90,8 @@ discovery and creation.
 text nodes, has bounded metadata and an 8-second parent deadline, and fails
 closed for discarded, crashed, unavailable, non-HTTP(S), or unsupported tabs.
 Its returned page content goes only to the requesting client and never enters
-default diagnostics. The current CLI and MCP adapter do not expose this daemon
-method.
+default diagnostics. The setup CLI intentionally exposes no page operations, and
+the current MCP adapter does not yet expose this daemon method.
 
 See [ADR 0002](adr/0002-shared-local-daemon.md) for the complete protocol and
 reconnect rationale.

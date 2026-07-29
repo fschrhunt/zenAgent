@@ -17,8 +17,8 @@ Every implementation phase must preserve these invariants:
 - [x] Never focus a Zen window, select a tab, or switch the visible Space.
 - [x] Never interrupt the selected tab or media playing in another tab.
 - [x] Open new tabs in the background in the appropriate Personal or Work Space.
-- [x] Keep the CLI and MCP server behavior identical by putting policy in one
-      shared daemon.
+- [x] Keep browser policy in one shared daemon; expose automation through MCP
+      and keep the CLI limited to setup, configuration, and diagnostics.
 - [x] Do not add a general-purpose manual approval layer for ordinary browser
       operations.
 - [x] Return an explicit ambiguity or capability error instead of silently
@@ -397,12 +397,12 @@ Tracking: [DEV-263](https://linear.app/intuitum/issue/DEV-263)
 - [x] Implement graceful shutdown and clean client disconnection.
 - [x] Decide whether the daemon starts on demand, through `launchd`, or both.
       The native messaging host is the daemon, so Zen starts it on browser
-      demand when the extension opens its port. CLI and MCP clients never start
-      a competing process that lacks that browser-provided connection.
+      demand when the extension opens its port. Setup CLI and MCP clients never
+      start a competing process that lacks that browser-provided connection.
 - [x] Add unit, protocol-contract, reconnect, concurrency, and crash-recovery
       tests.
 
-## 7. Implement the terminal CLI
+## 7. Implement the setup and maintenance CLI
 
 Tracking: [DEV-265](https://linear.app/intuitum/issue/DEV-265)
 
@@ -414,19 +414,18 @@ Tracking: [DEV-265](https://linear.app/intuitum/issue/DEV-265)
       unavailable, unsupported capability, timeout, and policy rejection.
 - [x] Implement `zen-agent status`.
 - [x] Implement `zen-agent spaces list`.
-- [x] Implement `zen-agent tabs list [--space ...] [--json]`.
-- [x] Implement `zen-agent tabs resolve <url-or-query> [--space ...]`.
-- [x] Implement `zen-agent tabs open <url> [--space ...]`.
-- [x] Implement `zen-agent tabs navigate <tab-id> <url>`.
-- [x] Implement `zen-agent tabs reload <tab-id>`.
-- [x] Implement `zen-agent tabs close <tab-id>`.
-- [x] Require an explicit stable tab ID for mutations of an existing tab.
-- [x] Make background behavior the default and omit any foreground flag until
-      there is a justified use case.
-- [x] Add `--explain` or equivalent routing diagnostics.
-- [x] State side effects in help text for every mutating command.
-- [x] Ensure all CLI operations go through the daemon.
-- [x] Add CLI unit, snapshot, daemon-boundary, and exit-code tests.
+- [x] Implement `zen-agent config map` with current Space-ID validation and
+      explicit daemon reload.
+- [x] Implement safe native-host install, upgrade, and uninstall commands.
+- [x] Make no-argument TTY invocation a branded arrow-key setup wizard for
+      native-host setup, Zen requirements, connection health, and Personal/Work
+      mapping while keeping explicit commands deterministic for agents.
+- [x] Remove tab listing, resolution, and mutation commands from the CLI; MCP is
+      the only agent-facing browser automation surface. Recorded in ADR 0004.
+- [x] Ensure status, discovery, and configuration operations go through the
+      daemon without starting a competing process.
+- [x] Add setup wizard and CLI unit, snapshot, daemon-boundary, TTY-boundary,
+      native-host inspection, and exit-code tests.
 
 ## 8. Implement background-safe page interaction
 
@@ -502,8 +501,8 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 - [ ] Add optimistic version checks to tab and snapshot mutations.
 - [x] Make safe retries idempotent. Retryable mutations require client-scoped
       idempotency keys with bounded retention.
-- [ ] Add load and race tests with multiple CLI and MCP clients. The daemon has
-      a two-client resolve race; sustained mixed CLI/MCP load remains.
+- [ ] Add load and race tests with multiple MCP clients. The daemon has a
+      two-client resolve race; sustained MCP load remains.
 
 ## 11. Security and privacy hardening
 
@@ -545,7 +544,8 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 
 ## 12. Testing and safety verification
 
-- [ ] Set a coverage target for policy, resolver, daemon, CLI, and MCP code.
+- [ ] Set a coverage target for policy, resolver, daemon, setup CLI, and MCP
+      code.
 - [ ] Add fixture sites for forms, navigation, frames, dialogs, downloads, and
       dynamic DOM replacement.
 - [x] Add transport contract tests that can run without Zen.
@@ -574,7 +574,7 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 - [x] Document Zen configuration and startup requirements.
 - [x] Document how to identify and map Personal and Work Spaces.
 - [x] Document installation, upgrade, and uninstall procedures.
-- [x] Document CLI commands with JSON examples and exit codes.
+- [x] Document setup CLI commands with JSON examples and exit codes.
 - [x] Document every current MCP tool with side effects and result examples.
 - [x] Document the daemon lifecycle and local files it creates.
 - [x] Document privacy defaults, redaction, and log locations.
@@ -593,9 +593,9 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
       artifact from GitHub Releases; npm remains an internal build tool only.
       Standalone binaries are deferred while the native host depends on Node.js.
       See [distribution](../docs/distribution.md).
-- [x] Decide whether the CLI, daemon, and MCP entry point ship in one package.
-      The bundled Homebrew release artifact contains all three executable entry
-      points.
+- [x] Decide whether the setup CLI, daemon, and MCP entry point ship in one
+      package. The bundled Homebrew release artifact contains all three
+      executable entry points.
 - [x] Bundle production code and verify the executable works outside the
       repository. A clean temporary install from the packed tarball passed CLI
       and sanitized MCP startup smoke tests.
@@ -618,7 +618,7 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 
 The first usable release is complete only when all of the following are true:
 
-- [ ] With the user's normal Zen session open, `zen-agent` can list all
+- [ ] With the user's normal Zen session open, Zen Agent MCP can list all
       supported windows, Spaces, and tabs without changing visible browser
       state.
 - [ ] It reuses an appropriate existing background tab when available.
@@ -627,8 +627,8 @@ The first usable release is complete only when all of the following are true:
 - [ ] It can inspect and interact with that explicit background tab.
 - [ ] A selected media tab continues playing without focus, selection, Space, or
       playback interruption.
-- [ ] The CLI and MCP interfaces produce equivalent results and structured
-      errors.
+- [ ] The MCP interface returns stable results and structured errors for every
+      supported browser operation.
 - [ ] Concurrent agents do not race, duplicate tabs, or mutate one another's
       leased tabs.
 - [ ] Installation, configuration, diagnostics, and recovery are documented.
@@ -656,8 +656,8 @@ The first usable release is complete only when all of the following are true:
       working together in a single add-on.
 - [x] How should Space ambiguity be surfaced to terminal agents? As a structured
       ambiguity error containing every equally safe candidate and a
-      machine-readable explanation; neither the daemon nor its CLI/MCP adapters
-      choose one.
+      machine-readable explanation; neither the daemon nor its MCP adapter
+      chooses one.
 - [x] What is the smallest safe page-interaction surface for the first release?
       [The page-interaction direction](../docs/spikes/page-interaction.md)
       selects semantic snapshots and narrowly named operations scoped to

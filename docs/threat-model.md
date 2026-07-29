@@ -2,8 +2,8 @@
 
 - Status: Initial baseline
 - Date: 2026-07-29
-- Scope: local daemon, CLI, MCP adapter, native messaging host, privileged Zen
-  extension, and browser-facing operations
+- Scope: local daemon, setup CLI, MCP adapter, native messaging host, privileged
+  Zen extension, and browser-facing operations
 
 Zen Agent controls a browser session the user is actively using. Its primary
 security property is not merely confidentiality: an unsafe operation can take
@@ -30,7 +30,7 @@ must preserve. A feature that cannot meet them fails closed.
 calling agent or user
         │ untrusted requests
         ▼
-CLI / MCP adapter
+setup CLI / MCP adapter
         │ authenticated or owner-only local protocol
         ▼
 shared daemon and policy
@@ -45,8 +45,8 @@ privileged Zen extension
 browser chrome and untrusted web pages
 ```
 
-The daemon is the policy boundary. CLI and MCP inputs are untrusted even when
-they originate from the same user account. Browser page content is always
+The daemon is the policy boundary. Setup CLI and MCP inputs are untrusted even
+when they originate from the same user account. Browser page content is always
 untrusted and may contain prompt injection or deliberately malformed data.
 
 ## Threats and required controls
@@ -66,7 +66,7 @@ Controls:
 - Make new tabs background-only; expose no foreground option.
 - Reject selected or playing-media tabs in the daemon and recheck live browser
   state synchronously at the privileged mutation boundary.
-- Keep policy in the daemon so CLI and MCP behavior cannot diverge.
+- Keep browser policy in the daemon rather than the MCP adapter.
 - Serialize conflicting mutations and use optimistic versions or leases.
 - Assert focus, selected tab, visible Space, and playback before and after every
   headed mutation scenario.

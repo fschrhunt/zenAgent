@@ -21,7 +21,7 @@ Zen Browser
   src/browser/registry.ts     the live model
         │  versioned local socket protocol
         ▼
-  CLI and MCP clients
+  setup CLI and MCP clients
 ```
 
 The extension is where the whole architecture earns its keep.

@@ -53,6 +53,12 @@ export interface NativeHostUninstallResult {
   readonly removed: boolean;
 }
 
+export interface NativeHostInstallation {
+  readonly status: "missing" | "installed" | "invalid";
+  readonly manifestPath: string;
+  readonly launcherPath: string;
+}
+
 export function nativeHostInstallDirectory(home: string = homedir()): string {
   return join(home, "Library", "Application Support", "Zen Agent");
 }
@@ -259,6 +265,55 @@ function isOwnedManifest(value: unknown, launcherPath: string): boolean {
     allowedExtensions.length === 1 &&
     allowedExtensions[0] === EXTENSION_ID
   );
+}
+
+/** Inspect the per-user installation without changing either target. */
+export function inspectNativeHostInstallation(
+  options: Pick<NativeHostInstallOptions, "home" | "platform"> = {},
+): NativeHostInstallation {
+  requireMacOS(options.platform ?? process.platform);
+
+  const home = options.home ?? homedir();
+  const launcherPath = nativeHostLauncherPath(home);
+  const destinationManifestPath = manifestPath(home);
+  const hasLauncher = existsSync(launcherPath);
+  const hasManifest = existsSync(destinationManifestPath);
+
+  if (!hasLauncher && !hasManifest) {
+    return {
+      status: "missing",
+      manifestPath: destinationManifestPath,
+      launcherPath,
+    };
+  }
+
+  if (!hasLauncher || !hasManifest || !isOwnedLauncher(launcherPath)) {
+    return {
+      status: "invalid",
+      manifestPath: destinationManifestPath,
+      launcherPath,
+    };
+  }
+
+  let parsedManifest: unknown;
+
+  try {
+    parsedManifest = JSON.parse(readFileSync(destinationManifestPath, "utf8"));
+  } catch {
+    return {
+      status: "invalid",
+      manifestPath: destinationManifestPath,
+      launcherPath,
+    };
+  }
+
+  return {
+    status: isOwnedManifest(parsedManifest, launcherPath)
+      ? "installed"
+      : "invalid",
+    manifestPath: destinationManifestPath,
+    launcherPath,
+  };
 }
 
 /**

@@ -15,7 +15,7 @@ Node.js.
 The release workflow runs the full project gate and creates one versioned
 tarball containing:
 
-- `zen-agent`, the command-line interface;
+- `zen-agent`, the interactive setup wizard and agent command backplane;
 - `zen-agent-host`, the Native Messaging host;
 - `zen-agent-mcp`, the stdio MCP server;
 - the privileged extension source; and
@@ -37,7 +37,7 @@ formula exist, users install with:
 
 ```sh
 brew install fschrhunt/tap/zen-agent
-zen-agent native-host install
+zen-agent
 ```
 
 The formula depends on Homebrew's `node`, downloads the immutable bundled
@@ -52,7 +52,8 @@ control. Submission to `homebrew/core` can be considered later, after Zen Agent
 has stable tagged releases and enough adoption to satisfy Homebrew's
 [acceptance criteria](https://docs.brew.sh/Acceptable-Formulae).
 
-After `brew upgrade`, rerun `zen-agent native-host install`. It refreshes the
+After `brew upgrade`, run `zen-agent` and choose **Repair native host**, or use
+`zen-agent native-host install` from automation. Either path refreshes the
 pinned Node and host-module paths only when both existing installation files
 validate as Zen Agent-owned.
 

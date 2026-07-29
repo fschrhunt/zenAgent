@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  inspectNativeHostInstallation,
   installNativeHost,
   nativeHostLauncherPath,
   uninstallNativeHost,
@@ -40,6 +41,20 @@ afterEach(() => {
 });
 
 describe("native host installer", () => {
+  it("reports an absent installation without creating files", () => {
+    const { home } = fixture();
+
+    expect(inspectNativeHostInstallation({ home, platform: "darwin" })).toEqual(
+      {
+        status: "missing",
+        manifestPath: manifestPath(home),
+        launcherPath: nativeHostLauncherPath(home),
+      },
+    );
+    expect(existsSync(manifestPath(home))).toBe(false);
+    expect(existsSync(nativeHostLauncherPath(home))).toBe(false);
+  });
+
   it("writes an owner-only launcher and manifest to the macOS user paths", () => {
     const { home, hostModulePath } = fixture();
     const result = installNativeHost({
@@ -141,6 +156,20 @@ describe("native host installer", () => {
     );
     expect(readFileSync(refreshed.manifestPath, "utf8")).toBe(originalManifest);
     expect(statSync(refreshed.launcherPath).mode & 0o777).toBe(0o700);
+    expect(
+      inspectNativeHostInstallation({ home, platform: "darwin" }).status,
+    ).toBe("installed");
+  });
+
+  it("reports a partial or foreign installation as invalid", () => {
+    const { home } = fixture();
+    const destinationManifestPath = manifestPath(home);
+    mkdirSync(dirname(destinationManifestPath), { recursive: true });
+    writeFileSync(destinationManifestPath, "foreign");
+
+    expect(
+      inspectNativeHostInstallation({ home, platform: "darwin" }).status,
+    ).toBe("invalid");
   });
 
   it("refuses to refresh a launcher that is not owned by Zen Agent", () => {

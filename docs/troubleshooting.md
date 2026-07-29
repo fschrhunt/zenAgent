@@ -59,24 +59,20 @@ Space or select a tab.
 Opaque entity IDs are scoped to one browser session. A browser or native-host
 restart invalidates old tab, window, and Space IDs.
 
-List current entities again:
+List current Spaces through the setup CLI and current tabs through MCP:
 
 ```sh
 zen-agent spaces list
-zen-agent tabs list
 ```
 
-Then retry with the new complete ID. Never extract and reuse only the
-transport-ID portion.
+Call `zen_tabs_list` to obtain current tab IDs, then retry with the new complete
+ID. Never extract and reuse only the transport-ID portion.
 
 ## Ambiguous or rejected resolution
 
-Ambiguity is a result, not a prompt to guess. Use `--explain` and either provide
-an explicit Space or narrow the URL/query:
-
-```sh
-zen-agent tabs resolve https://example.com/path --space work --explain
-```
+Ambiguity is a result, not a prompt to guess. Inspect the structured
+`zen_tabs_resolve` MCP result and either provide an explicit Space or narrow the
+URL/query.
 
 Equally specific routing rules that target different Spaces are rejected.
 Unknown aliases and task-context hints do not fall through to a safe default.
@@ -117,8 +113,8 @@ file for isolated testing.
 
 The daemon supports bounded, read-only `pages.inspect` for an explicitly
 identified loaded HTTP(S) tab. It returns URL, title, load state, and visible
-text, but the current CLI and MCP adapter do not expose a corresponding
-command/tool.
+text. The setup CLI intentionally has no page operations, and the current MCP
+adapter does not yet expose a corresponding tool.
 
 An `unsupported-capability` from the daemon inspection path can mean the tab is
 discarded, crashed, not loaded, non-HTTP(S), or running on an unproven browser
@@ -136,7 +132,8 @@ Include:
 - the Zen and Gecko versions;
 - macOS architecture and version;
 - Node and npm versions;
-- the CLI command name, exit code, and sanitized error code;
+- the setup CLI command or MCP tool name, plus any sanitized error code or exit
+  code;
 - whether Zen was restarted since the opaque IDs were listed;
 - whether the extension was temporary or persistent.
 

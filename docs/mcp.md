@@ -1,7 +1,9 @@
 # MCP server
 
 Zen Agent includes a local stdio MCP server that is a thin adapter over the
-shared daemon. It never connects to Zen or the native host directly.
+shared daemon. It is the sole public browser automation interface; the
+`zen-agent` CLI is reserved for setup, configuration, and diagnostics. The MCP
+server never connects to Zen or the native host directly.
 
 ## Configure a client
 
