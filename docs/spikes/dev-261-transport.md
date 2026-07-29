@@ -390,6 +390,72 @@ The extension path has no focus cost but a much heavier install story.
 Either way the shape is the same: **BiDi cannot be the only transport**, and the
 second channel must be chrome-privileged.
 
+## 10. Attaching to a real profile rewrites 87 preferences
+
+**Proven, on the daily profile, and this is a blocker for the whole approach.**
+
+Launching the user's own profile with `--remote-debugging-port` caused the
+remote agent to write **87 preferences into `prefs.js`**, on the _user_ branch,
+not the default branch. Among them:
+
+```
+browser.safebrowsing.phishing.enabled   false
+browser.safebrowsing.malware.enabled    false
+browser.safebrowsing.downloads.enabled  false
+browser.safebrowsing.blockedURIs.enabled false
+signon.rememberSignons                  false
+signon.management.page.breach-alerts.enabled false
+extensions.update.enabled               false
+services.settings.server                "data:,#remote-settings-dummy/v1"
+browser.sessionstore.resume_from_crash  false
+app.update.disabledForTesting           true
+security.fileuri.strict_origin_policy   false
+```
+
+That is phishing and malware protection off, the password manager off, breach
+alerts off, extension updates off, and remote settings pointed at a dummy URL —
+on a browser holding the user's live logged-in sessions.
+
+`RecommendedPreferences.applyPreferences()` guards each write with
+`prefHasUserValue`, so preferences the user had set themselves were left alone
+(three, here). Everything else was overwritten, and `restorePreferences()` only
+runs on `xpcom-shutdown`. **A clean quit did not reliably clear them**: after
+`tell application "Zen" to quit` they were still present in `prefs.js`, and had
+to be removed by hand with the browser closed. A crash or force-kill would leave
+them permanently.
+
+**The mitigation is mandatory and must come first.** Set
+
+```
+remote.prefs.recommended = false
+```
+
+in the profile _before_ ever launching it with `--remote-debugging-port`. The
+flag is checked at the top of `applyPreferences()`, and with it false the agent
+writes nothing. Any launcher this project ships must refuse to attach to a real
+profile that does not have it set.
+
+## 11. On a real profile, BiDi saw 1 tab out of 22
+
+**Proven, and worse than section 8 predicted.**
+
+The daily profile had 22 tabs (15 essential, 6 Personal, 1 Work) with Personal
+visible. After relaunching with the remote agent and connecting,
+`browsingContext.getTree` returned **one** context: `about:blank`.
+
+This is upstream
+[bug 1876240](https://bugzilla.mozilla.org/show_bug.cgi?id=1876240). Session-
+restored tabs are lazy: `linkedBrowser` is non-null but `browsingContext` is
+null, so `isValidCanonicalBrowsingContext` rejects them and they are dropped
+from the tree with no error and no id.
+
+It also means section 8 could not be tested at all — nothing was visible to
+compare. The Space question is still open, but it is now moot for BiDi-only
+discovery: **a transport that cannot see 21 of 22 tabs after a browser restart
+cannot support "discover before you open" or "reuse by stable id"**, which are
+the first two product principles. Loading every tab to make it visible is not an
+option; it would defeat the purpose.
+
 ## Open questions still to test
 
 These need a **headed** run against a profile that has real Zen Spaces, which
@@ -400,10 +466,6 @@ means restarting the user's daily Zen with `--remote-debugging-port`:
 - **Confirm §1 empirically**, on a scratch profile first: does
   `--start-debugger-server` forwarded into a running Zen open a privileged
   server, and does it raise the window on macOS?
-- Do lazy/session-restored tabs appear in `getTree` at all? Upstream
-  [bug 1876240](https://bugzilla.mozilla.org/show_bug.cgi?id=1876240) says a tab
-  with a null `browsingContext` is silently omitted, which on a restored daily
-  profile could hide most tabs even within the visible Space.
 - Does macOS occlusion matter in practice? `RecomputeAppWindowVisibility`
   deactivates every tab in a fully occluded window, so a full-screen terminal
   covering Zen may itself break background operation.
