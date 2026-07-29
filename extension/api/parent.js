@@ -25,9 +25,19 @@
 const { PrivateBrowsingUtils } = ChromeUtils.importESModule(
   "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
 );
+const { setTimeout: setActorTimeout, clearTimeout: clearActorTimeout } =
+  ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
 
 /** Schemes we will open with a system principal. Anything else is refused. */
 const OPENABLE_SCHEMES = new Set(["http:", "https:"]);
+const PAGE_ACTOR_NAME = "ZenAgentPage";
+const PAGE_ACTOR_RESOURCE = "zen-agent-page";
+const DEFAULT_INSPECTION_CHARS = 2_000;
+const MAX_INSPECTION_CHARS = 10_000;
+const INSPECTION_TIMEOUT_MS = 8_000;
+let pageActorRegistered = false;
+let pageActorRegistrationError = null;
+let pageActorResourceRegistered = false;
 
 /**
  * Tab attributes worth reporting a change for. `TabAttrModified` is extremely
@@ -112,6 +122,74 @@ function guarded(operation, run) {
         stack: error && error.stack ? String(error.stack) : null,
       },
     };
+  }
+}
+
+async function guardedAsync(operation, run) {
+  try {
+    return { ok: true, value: await run() };
+  } catch (error) {
+    return {
+      ok: false,
+      error: {
+        code: error && typeof error.code === "string" ? error.code : "internal",
+        message: `${operation}: ${String(
+          error && error.message ? error.message : error,
+        )}`,
+        stack: error && error.stack ? String(error.stack) : null,
+      },
+    };
+  }
+}
+
+function registerPageActor(context) {
+  if (pageActorRegistered) {
+    return;
+  }
+
+  try {
+    const root = context.extension.rootURI;
+    const resourceProtocol = Services.io
+      .getProtocolHandler("resource")
+      .QueryInterface(Ci.nsISubstitutingProtocolHandler);
+
+    if (resourceProtocol.hasSubstitution(PAGE_ACTOR_RESOURCE)) {
+      throw new ZenAgentError(
+        "unsupported-capability",
+        "The page-inspection resource name is already registered.",
+      );
+    }
+
+    resourceProtocol.setSubstitution(PAGE_ACTOR_RESOURCE, root);
+    pageActorResourceRegistered = true;
+    ChromeUtils.registerWindowActor(PAGE_ACTOR_NAME, {
+      allFrames: false,
+      matches: ["http://*/*", "https://*/*"],
+      parent: {
+        esModuleURI: `resource://${PAGE_ACTOR_RESOURCE}/actors/ZenAgentPageParent.sys.mjs`,
+      },
+      child: {
+        esModuleURI: `resource://${PAGE_ACTOR_RESOURCE}/actors/ZenAgentPageChild.sys.mjs`,
+      },
+    });
+    pageActorRegistered = true;
+    pageActorRegistrationError = null;
+  } catch (error) {
+    if (pageActorResourceRegistered) {
+      try {
+        const resourceProtocol = Services.io
+          .getProtocolHandler("resource")
+          .QueryInterface(Ci.nsISubstitutingProtocolHandler);
+        resourceProtocol.setSubstitution(PAGE_ACTOR_RESOURCE, null);
+      } catch {
+        // Preserve the registration error that made the capability unavailable.
+      }
+      pageActorResourceRegistered = false;
+    }
+
+    pageActorRegistrationError = String(
+      error && error.message ? error.message : error,
+    );
   }
 }
 
@@ -231,6 +309,10 @@ function capabilities() {
 
   if (tab && "soundPlaying" in tab) {
     found.push("browser.tabs.media-state");
+  }
+
+  if (pageActorRegistered) {
+    found.push("browser.pages.inspect");
   }
 
   return found;
@@ -388,6 +470,32 @@ function windowFor(windowId) {
 }
 
 /**
+ * Recheck live foreground and media state immediately before an existing-tab
+ * mutation. The daemon's snapshot check gives callers an early refusal, while
+ * this synchronous browser-chrome check closes the race in which the user
+ * selects the tab or starts playback after discovery.
+ */
+function safeMutationWindow(tab) {
+  const win = windowOf(tab);
+
+  if (win.gBrowser.selectedTab === tab) {
+    throw new ZenAgentError(
+      "policy-rejection",
+      "Zen Agent will not mutate the currently selected tab.",
+    );
+  }
+
+  if ("soundPlaying" in tab && Boolean(tab.soundPlaying)) {
+    throw new ZenAgentError(
+      "policy-rejection",
+      "Zen Agent will not mutate a tab that is playing media.",
+    );
+  }
+
+  return win;
+}
+
+/**
  * Open a background tab, optionally routed into an explicit Space.
  *
  * `inBackground: true` keeps the selected tab put, and `moveTabToWorkspace` is
@@ -448,7 +556,7 @@ function openTab(options) {
  */
 function moveTab(tabId, zenSpaceUuid) {
   const tab = resolve(tabId);
-  const win = windowOf(tab);
+  const win = safeMutationWindow(tab);
   const zen = win.gZenWorkspaces;
 
   if (typeof zen?.moveTabToWorkspace !== "function") {
@@ -468,6 +576,7 @@ function moveTab(tabId, zenSpaceUuid) {
 
 function navigateTab(tabId, url) {
   const tab = resolve(tabId);
+  safeMutationWindow(tab);
   const target = assertOpenableUrl(url);
 
   if (!tab.linkedBrowser) {
@@ -481,15 +590,107 @@ function navigateTab(tabId, url) {
   return {};
 }
 
+function reloadTab(tabId) {
+  const tab = resolve(tabId);
+  safeMutationWindow(tab);
+
+  if (!tab.linkedBrowser || typeof tab.linkedBrowser.reload !== "function") {
+    throw new ZenAgentError("stale-id", "That tab is no longer reloadable.");
+  }
+
+  tab.linkedBrowser.reload();
+  return {};
+}
+
+function inspectionCharacterLimit(options) {
+  const requested = options?.maxChars ?? DEFAULT_INSPECTION_CHARS;
+
+  if (
+    !Number.isInteger(requested) ||
+    requested < 1 ||
+    requested > MAX_INSPECTION_CHARS
+  ) {
+    throw new ZenAgentError(
+      "invalid-request",
+      `maxChars must be an integer from 1 through ${MAX_INSPECTION_CHARS}.`,
+    );
+  }
+
+  return requested;
+}
+
+async function inspectPage(tabId, options) {
+  if (!pageActorRegistered) {
+    throw new ZenAgentError(
+      "unsupported-capability",
+      pageActorRegistrationError === null
+        ? "The page-inspection actor is unavailable."
+        : `The page-inspection actor could not be registered: ${pageActorRegistrationError}`,
+    );
+  }
+
+  const tab = resolve(tabId);
+  windowOf(tab);
+
+  if (lifecycleOf(tab) !== "open" || !tab.linkedBrowser) {
+    throw new ZenAgentError(
+      "unsupported-capability",
+      "That tab has no loaded document to inspect.",
+    );
+  }
+
+  const current = tab.linkedBrowser.currentURI;
+
+  if (!current || !OPENABLE_SCHEMES.has(`${current.scheme}:`)) {
+    throw new ZenAgentError(
+      "unsupported-capability",
+      "Page inspection supports loaded HTTP(S) tabs only.",
+    );
+  }
+
+  const windowGlobal = tab.linkedBrowser.browsingContext?.currentWindowGlobal;
+
+  if (!windowGlobal) {
+    throw new ZenAgentError(
+      "stale-id",
+      "That tab's current document is no longer available.",
+    );
+  }
+
+  const actor = windowGlobal.getActor(PAGE_ACTOR_NAME);
+  const query = actor.inspect({
+    maxChars: inspectionCharacterLimit(options),
+  });
+  let timeout;
+  const deadline = new Promise((_, reject) => {
+    timeout = setActorTimeout(() => {
+      reject(
+        new ZenAgentError(
+          "timeout",
+          `Page inspection did not answer within ${INSPECTION_TIMEOUT_MS}ms.`,
+        ),
+      );
+    }, INSPECTION_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([query, deadline]);
+  } finally {
+    clearActorTimeout(timeout);
+  }
+}
+
 function closeTab(tabId) {
   const tab = resolve(tabId);
-  windowOf(tab).gBrowser.removeTab(tab);
+  safeMutationWindow(tab).gBrowser.removeTab(tab);
   identity.byId.delete(tabId);
   return {};
 }
 
 var zenAgent = class extends ExtensionAPI {
   getAPI(context) {
+    registerPageActor(context);
+
     return {
       zenAgent: {
         describe: async () => guarded("describe", () => describe()),
@@ -499,6 +700,10 @@ var zenAgent = class extends ExtensionAPI {
           guarded("moveTab", () => moveTab(tabId, zenSpaceUuid)),
         navigateTab: async (tabId, url) =>
           guarded("navigateTab", () => navigateTab(tabId, url)),
+        reloadTab: async (tabId) =>
+          guarded("reloadTab", () => reloadTab(tabId)),
+        inspectPage: async (tabId, options) =>
+          guardedAsync("inspectPage", () => inspectPage(tabId, options)),
         closeTab: async (tabId) => guarded("closeTab", () => closeTab(tabId)),
 
         onChanged: new ExtensionCommon.EventManager({
@@ -617,5 +822,29 @@ var zenAgent = class extends ExtensionAPI {
         }).api(),
       },
     };
+  }
+
+  onShutdown(isAppShutdown) {
+    if (!isAppShutdown && pageActorRegistered) {
+      try {
+        ChromeUtils.unregisterWindowActor(PAGE_ACTOR_NAME);
+      } catch {
+        // Browser shutdown or another reload may have removed it first.
+      }
+    }
+
+    if (!isAppShutdown && pageActorResourceRegistered) {
+      try {
+        const resourceProtocol = Services.io
+          .getProtocolHandler("resource")
+          .QueryInterface(Ci.nsISubstitutingProtocolHandler);
+        resourceProtocol.setSubstitution(PAGE_ACTOR_RESOURCE, null);
+      } catch {
+        // Browser shutdown may already have torn the handler down.
+      }
+    }
+
+    pageActorRegistered = false;
+    pageActorResourceRegistered = false;
   }
 };

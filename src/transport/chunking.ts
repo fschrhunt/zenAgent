@@ -35,6 +35,12 @@ export const DEFAULT_MAX_PENDING_BYTES = 32 * 1024 * 1024;
 /** Default ceiling on simultaneously reassembling messages. */
 export const DEFAULT_MAX_PENDING_MESSAGES = 8;
 
+/** Prevent a tiny-body envelope from allocating an enormous sparse array. */
+export const DEFAULT_MAX_CHUNKS_PER_MESSAGE = 4_096;
+
+/** Bound a complete value before producing any chunk frames. */
+export const DEFAULT_MAX_CHUNKED_MESSAGE_BYTES = 32 * 1024 * 1024;
+
 export class ChunkingError extends Error {
   public constructor(message: string) {
     super(message);
@@ -67,6 +73,7 @@ export function encodeChunked(
   value: unknown,
   maxFrameBytes: number = MAX_HOST_TO_BROWSER_BYTES,
   id: string = randomUUID(),
+  maxMessageBytes: number = DEFAULT_MAX_CHUNKED_MESSAGE_BYTES,
 ): readonly Uint8Array[] {
   const json = JSON.stringify(value);
 
@@ -75,6 +82,12 @@ export function encodeChunked(
   }
 
   const body = Buffer.from(json, "utf8");
+
+  if (body.byteLength > maxMessageBytes) {
+    throw new ChunkingError(
+      `A chunked message of ${String(body.byteLength)} bytes exceeds the ${String(maxMessageBytes)} byte limit.`,
+    );
+  }
 
   if (body.byteLength <= maxFrameBytes) {
     return [encodeMessage(value, maxFrameBytes)];
@@ -143,17 +156,34 @@ export class ChunkAssembler {
   readonly #pending = new Map<string, PendingMessage>();
   readonly #maxPendingBytes: number;
   readonly #maxPendingMessages: number;
+  readonly #maxChunksPerMessage: number;
 
   public constructor(
     options: {
       readonly maxPendingBytes?: number;
       readonly maxPendingMessages?: number;
+      readonly maxChunksPerMessage?: number;
     } = {},
   ) {
     this.#maxPendingBytes =
       options.maxPendingBytes ?? DEFAULT_MAX_PENDING_BYTES;
     this.#maxPendingMessages =
       options.maxPendingMessages ?? DEFAULT_MAX_PENDING_MESSAGES;
+    this.#maxChunksPerMessage =
+      options.maxChunksPerMessage ?? DEFAULT_MAX_CHUNKS_PER_MESSAGE;
+
+    if (
+      !Number.isSafeInteger(this.#maxPendingBytes) ||
+      this.#maxPendingBytes <= 0 ||
+      !Number.isSafeInteger(this.#maxPendingMessages) ||
+      this.#maxPendingMessages <= 0 ||
+      !Number.isSafeInteger(this.#maxChunksPerMessage) ||
+      this.#maxChunksPerMessage <= 0
+    ) {
+      throw new TypeError(
+        "Chunk reassembly limits must be positive safe integers.",
+      );
+    }
   }
 
   /** Bytes currently held for messages that are still arriving. */
@@ -185,7 +215,19 @@ export class ChunkAssembler {
     if (pending.slices[message.index] !== undefined) {
       this.#pending.delete(message.id);
       throw new ChunkingError(
-        `Chunk index ${String(message.index)} arrived twice for message ${JSON.stringify(message.id)}.`,
+        `Chunk index ${String(message.index)} arrived twice for one message.`,
+      );
+    }
+
+    const estimatedBytes = decodedBase64Bytes(message.body);
+
+    if (
+      pending.bytes + estimatedBytes > this.#maxPendingBytes ||
+      this.pendingBytes + estimatedBytes > this.#maxPendingBytes
+    ) {
+      this.#pending.delete(message.id);
+      throw new ChunkingError(
+        `Reassembly buffers would exceed ${String(this.#maxPendingBytes)} bytes.`,
       );
     }
 
@@ -212,9 +254,9 @@ export class ChunkAssembler {
 
     try {
       return JSON.parse(body.toString("utf8"));
-    } catch (error) {
+    } catch {
       throw new FramingError(
-        `A reassembled message did not contain valid JSON: ${String(error)}`,
+        "A reassembled message did not contain valid JSON.",
       );
     }
   }
@@ -231,7 +273,7 @@ export class ChunkAssembler {
       if (existing.count !== envelope.count) {
         this.#pending.delete(envelope.id);
         throw new ChunkingError(
-          `Message ${JSON.stringify(envelope.id)} changed its chunk count from ${String(existing.count)} to ${String(envelope.count)}.`,
+          `A message changed its chunk count from ${String(existing.count)} to ${String(envelope.count)}.`,
         );
       }
 
@@ -241,6 +283,12 @@ export class ChunkAssembler {
     if (envelope.count <= 0) {
       throw new ChunkingError(
         `A chunked message must declare at least one chunk, not ${String(envelope.count)}.`,
+      );
+    }
+
+    if (envelope.count > this.#maxChunksPerMessage) {
+      throw new ChunkingError(
+        `A chunked message declared more than ${String(this.#maxChunksPerMessage)} chunks.`,
       );
     }
 
@@ -259,4 +307,19 @@ export class ChunkAssembler {
     this.#pending.set(envelope.id, created);
     return created;
   }
+}
+
+function decodedBase64Bytes(body: string): number {
+  if (
+    body.length === 0 ||
+    body.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(
+      body,
+    )
+  ) {
+    throw new ChunkingError("A chunk body must be canonical base64.");
+  }
+
+  const padding = body.endsWith("==") ? 2 : body.endsWith("=") ? 1 : 0;
+  return (body.length / 4) * 3 - padding;
 }

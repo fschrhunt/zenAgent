@@ -1,6 +1,6 @@
 # Zen Agent TODO
 
-Last updated: 2026-07-28
+Last updated: 2026-07-29
 
 This is the dependency-ordered implementation checklist for Zen Agent. Check an
 item only after its acceptance criteria are verified. Product work is tracked in
@@ -11,19 +11,19 @@ the
 
 Every implementation phase must preserve these invariants:
 
-- [ ] Discover windows, Spaces, and tabs before deciding to open a tab.
-- [ ] Reuse an appropriate existing tab when one is already open.
-- [ ] Address existing tabs by stable ID, never by whichever tab is active.
-- [ ] Never focus a Zen window, select a tab, or switch the visible Space.
-- [ ] Never interrupt the selected tab or media playing in another tab.
-- [ ] Open new tabs in the background in the appropriate Personal or Work Space.
-- [ ] Keep the CLI and MCP server behavior identical by putting policy in one
+- [x] Discover windows, Spaces, and tabs before deciding to open a tab.
+- [x] Reuse an appropriate existing tab when one is already open.
+- [x] Address existing tabs by stable ID, never by whichever tab is active.
+- [x] Never focus a Zen window, select a tab, or switch the visible Space.
+- [x] Never interrupt the selected tab or media playing in another tab.
+- [x] Open new tabs in the background in the appropriate Personal or Work Space.
+- [x] Keep the CLI and MCP server behavior identical by putting policy in one
       shared daemon.
-- [ ] Do not add a general-purpose manual approval layer for ordinary browser
+- [x] Do not add a general-purpose manual approval layer for ordinary browser
       operations.
-- [ ] Return an explicit ambiguity or capability error instead of silently
+- [x] Return an explicit ambiguity or capability error instead of silently
       choosing an unsafe fallback.
-- [ ] Keep page content, cookies, credentials, tokens, and form values out of
+- [x] Keep page content, cookies, credentials, tokens, and form values out of
       logs by default.
 
 ## 0. Finish the repository foundation
@@ -231,9 +231,11 @@ by a real browser instead of fixtures.
       unsupported-capability error instead of calling optimistically. The probe
       is in `capabilities()`; the refusal is unit-tested on the host side and
       names the Zen version. The probe itself still needs a headed run.
-- [ ] Record the Zen versions the capability probe has actually passed on, and
-      fail closed on versions it has not. Zen 1.21.9b / Gecko 153.0 now passes
-      all eight capabilities; the version gate itself is not written yet.
+- [x] Record the Zen versions the capability probe has actually passed on, and
+      fail closed on versions it has not. The host now accepts exactly Zen
+      1.21.9b / Gecko 153.0, the pair that passed all eight capabilities and the
+      complete headed proof four times. Unknown pairs are refused before the
+      first snapshot or mutation.
 - [x] Keep an MV3 background event page holding one native messaging port open,
       since that is the only supported way to keep it alive. **Proven.** Zen
       loads a single MV3 add-on that also declares `experiment_apis` — the
@@ -249,12 +251,14 @@ by a real browser instead of fixtures.
       `src/transport/framing.ts`, with byte-length and split-frame tests.
 - [x] Never write anything but framed messages to stdout; diagnostics go to
       stderr or a log file. Verified by driving the built binary end to end.
-- [ ] Install the host manifest to
+- [x] Install the host manifest to
       `~/Library/Application Support/Mozilla/NativeMessagingHosts/`, not the
       `.../Zen/` path some third-party installers guess. The path and contents
       are implemented and tested in `src/native/manifest.ts`, and the headed
-      proof confirms Zen launches a host registered there. No installer writes
-      it for a real user yet.
+      proof confirms Zen launches a host registered there.
+      `zen-agent native-host install` now creates an owner-only executable
+      launcher and manifest without overwriting either target; the matching
+      uninstall command removes only files it can verify Zen Agent owns.
 - [x] Restrict `allowed_extensions` to the add-on's own ID.
 - [x] Chunk any payload approaching the 1 MiB host-to-browser cap, and reject
       anything above a configured ceiling rather than truncating it. Note the
@@ -310,101 +314,119 @@ Tracking: [DEV-274](https://linear.app/intuitum/issue/DEV-274), split out of
 DEV-262. This section needs no browser, so it can proceed in parallel with
 section 3.
 
-- [ ] Choose a versioned local configuration format and path.
-- [ ] Add schema validation with actionable error messages.
-- [ ] Support explicit Zen profile selection.
-- [ ] Support explicit mappings from Zen Space IDs to `personal` and `work`.
-- [ ] Support named Space aliases without relying on their visual position.
-- [ ] Support domain and URL rules for Personal/Work routing.
-- [ ] Support an explicit per-command or per-tool Space override.
-- [ ] Support a task-context hint such as `personal`, `work`, or a named Space.
-- [ ] Define deterministic precedence:
-  1. [ ] Explicit stable Space ID or alias.
-  2. [ ] Configured URL/domain rule.
-  3. [ ] Explicit task-context hint.
-  4. [ ] Configured safe default.
-  5. [ ] Ambiguity error.
-- [ ] Decide how conflicting domain rules are reported.
-- [ ] Never infer that a domain such as GitHub is always Personal or always Work
+- [x] Choose a versioned local configuration format and path. Schema v1 JSON
+      lives under the user's platform configuration directory, with an
+      explicit-path override for callers and tests.
+- [x] Add schema validation with actionable error messages.
+- [x] Support explicit Zen profile selection.
+- [x] Support explicit mappings from Zen Space IDs to `personal` and `work`.
+- [x] Support named Space aliases without relying on their visual position.
+- [x] Support domain and URL rules for Personal/Work routing.
+- [x] Support an explicit per-command or per-tool Space override.
+- [x] Support a task-context hint such as `personal`, `work`, or a named Space.
+- [x] Define deterministic precedence:
+  1. [x] Explicit stable Space ID or alias.
+  2. [x] Configured URL/domain rule.
+  3. [x] Explicit task-context hint.
+  4. [x] Configured safe default.
+  5. [x] Ambiguity error.
+- [x] Decide how conflicting domain rules are reported. Equally specific rules
+      targeting different Spaces return every candidate and contributing rule ID
+      without choosing.
+- [x] Never infer that a domain such as GitHub is always Personal or always Work
       without user configuration.
-- [ ] Add a dry-run/explain result that reports why a Space and tab were chosen.
-- [ ] Add a configuration command that can map the currently discovered Zen
-      Space IDs without selecting those Spaces.
-- [ ] Add unit tests for Personal, Work, named Space, explicit override,
+- [x] Add a dry-run/explain result that reports why a Space and tab were chosen.
+- [x] Add a configuration command that can map the currently discovered Zen
+      Space IDs without selecting those Spaces. `zen-agent config map` reads
+      current discovery through the daemon and writes the validated config
+      atomically.
+- [x] Add unit tests for Personal, Work, named Space, explicit override,
       conflicts, missing mappings, and safe-default behavior.
 
 ## 5. Implement tab discovery and resolution
 
-- [ ] Normalize URLs for comparison without discarding security-relevant
-      components.
-- [ ] Define matching rules for exact URL, normalized URL, origin, domain,
+- [x] Normalize URLs for comparison without discarding security-relevant
+      components. Credentials, scheme, port, path, query, and fragment remain
+      part of comparison; only the URL standard's canonical serialization is
+      applied.
+- [x] Define matching rules for exact URL, normalized URL, origin, domain,
       title, and caller-provided query.
-- [ ] Prefer an exact matching tab in the chosen Space.
-- [ ] Never reuse a matching tab from the wrong Space unless explicitly
+- [x] Prefer an exact matching tab in the chosen Space.
+- [x] Never reuse a matching tab from the wrong Space unless explicitly
       requested.
-- [ ] Avoid reusing sensitive or stateful pages merely because their domains
-      match.
-- [ ] Return all candidates and an ambiguity error when more than one tab is an
+- [x] Avoid reusing sensitive or stateful pages merely because their domains
+      match. Weak matching is refused by default for credentials, query,
+      fragment, and sensitive workflow paths.
+- [x] Return all candidates and an ambiguity error when more than one tab is an
       equally safe match.
-- [ ] Include a machine-readable explanation of `reused`, `opened`, or
+- [x] Include a machine-readable explanation of `reused`, `opened`, or
       `ambiguous` in every resolution result.
-- [ ] Make tab creation idempotent so concurrent agents do not open duplicates.
-- [ ] Ensure a newly opened tab stays in the background.
-- [ ] Ensure navigation targets the resolved stable tab ID.
+- [x] Make tab creation idempotent so concurrent agents do not open duplicates.
+      Equivalent resolver work coalesces, daemon mutations serialize across
+      clients, and a two-client race test proves one open followed by one reuse.
+- [x] Ensure a newly opened tab stays in the background. The transport exposes
+      no foreground option and the headed proof verifies selection is unchanged.
+- [x] Ensure navigation targets the resolved stable tab ID.
 - [ ] Handle popups, redirects, discarded tabs, crashed tabs, and tabs closed
       between resolution and action.
-- [ ] Add race tests for simultaneous resolve/open requests.
+- [x] Add race tests for simultaneous resolve/open requests. Equivalent
+      in-flight resolutions coalesce and creation receives an opaque
+      deterministic idempotency key; daemon/transport enforcement remains.
 
 ## 6. Build the shared local daemon
 
 Tracking: [DEV-263](https://linear.app/intuitum/issue/DEV-263)
 
-- [ ] Choose and document the daemon protocol, initially over a Unix domain
-      socket.
-- [ ] Define a versioned request, response, event, and error schema.
-- [ ] Implement singleton startup and stale lock/PID recovery.
-- [ ] Use restrictive local socket and state-file permissions.
-- [ ] Own exactly one transport connection per Zen session/profile.
-- [ ] Maintain the live browser/window/Space/tab registry.
-- [ ] Subscribe to lifecycle events and reconcile missed events with periodic
+- [x] Choose and document the daemon protocol, initially over a Unix domain
+      socket. [ADR 0002](../docs/adr/0002-shared-local-daemon.md).
+- [x] Define a versioned request, response, event, and error schema.
+- [x] Implement singleton startup and stale lock/PID recovery.
+- [x] Use restrictive local socket and state-file permissions.
+- [x] Own exactly one transport connection per Zen session/profile.
+- [x] Maintain the live browser/window/Space/tab registry.
+- [x] Subscribe to lifecycle events and reconcile missed events with periodic
       snapshots.
-- [ ] Reconnect safely after Zen restarts or the protocol disconnects.
-- [ ] Invalidate old stable IDs after session replacement.
-- [ ] Serialize conflicting mutations while allowing safe concurrent reads.
-- [ ] Enforce all background-only and explicit-ID invariants in the daemon.
-- [ ] Add idempotency keys for retryable mutations.
-- [ ] Add health, version, capabilities, and status methods.
-- [ ] Add structured, sanitized diagnostic logging.
-- [ ] Add configurable log levels without logging page content by default.
-- [ ] Implement graceful shutdown and clean client disconnection.
-- [ ] Decide whether the daemon starts on demand, through `launchd`, or both.
-- [ ] Add unit, protocol-contract, reconnect, concurrency, and crash-recovery
+- [x] Reconnect safely after Zen restarts or the protocol disconnects.
+- [x] Invalidate old stable IDs after session replacement.
+- [x] Serialize conflicting mutations while allowing safe concurrent reads.
+- [x] Enforce all background-only and explicit-ID invariants in the daemon.
+- [x] Add idempotency keys for retryable mutations.
+- [x] Add health, version, capabilities, and status methods.
+- [x] Add structured, sanitized diagnostic logging.
+- [x] Add configurable log levels without logging page content by default.
+- [x] Implement graceful shutdown and clean client disconnection.
+- [x] Decide whether the daemon starts on demand, through `launchd`, or both.
+      The native messaging host is the daemon, so Zen starts it on browser
+      demand when the extension opens its port. CLI and MCP clients never start
+      a competing process that lacks that browser-provided connection.
+- [x] Add unit, protocol-contract, reconnect, concurrency, and crash-recovery
       tests.
 
 ## 7. Implement the terminal CLI
 
 Tracking: [DEV-265](https://linear.app/intuitum/issue/DEV-265)
 
-- [ ] Choose a command/parser library or intentionally retain a small custom
-      parser.
-- [ ] Define stable human-readable and JSON output contracts.
-- [ ] Define stable exit codes for invalid input, ambiguity, stale ID, browser
+- [x] Choose a command/parser library or intentionally retain a small custom
+      parser. The dependency-free parser is retained deliberately and covered
+      through the complete command surface.
+- [x] Define stable human-readable and JSON output contracts.
+- [x] Define stable exit codes for invalid input, ambiguity, stale ID, browser
       unavailable, unsupported capability, timeout, and policy rejection.
-- [ ] Implement `zen-agent status`.
-- [ ] Implement `zen-agent spaces list`.
-- [ ] Implement `zen-agent tabs list [--space ...] [--json]`.
-- [ ] Implement `zen-agent tabs resolve <url-or-query> [--space ...]`.
-- [ ] Implement `zen-agent tabs open <url> [--space ...]`.
-- [ ] Implement `zen-agent tabs navigate <tab-id> <url>`.
-- [ ] Implement `zen-agent tabs reload <tab-id>`.
-- [ ] Implement `zen-agent tabs close <tab-id>`.
-- [ ] Require an explicit stable tab ID for mutations of an existing tab.
-- [ ] Make background behavior the default and omit any foreground flag until
+- [x] Implement `zen-agent status`.
+- [x] Implement `zen-agent spaces list`.
+- [x] Implement `zen-agent tabs list [--space ...] [--json]`.
+- [x] Implement `zen-agent tabs resolve <url-or-query> [--space ...]`.
+- [x] Implement `zen-agent tabs open <url> [--space ...]`.
+- [x] Implement `zen-agent tabs navigate <tab-id> <url>`.
+- [x] Implement `zen-agent tabs reload <tab-id>`.
+- [x] Implement `zen-agent tabs close <tab-id>`.
+- [x] Require an explicit stable tab ID for mutations of an existing tab.
+- [x] Make background behavior the default and omit any foreground flag until
       there is a justified use case.
-- [ ] Add `--explain` or equivalent routing diagnostics.
-- [ ] State side effects in help text for every mutating command.
-- [ ] Ensure all CLI operations go through the daemon.
-- [ ] Add CLI unit, snapshot, daemon-boundary, and exit-code tests.
+- [x] Add `--explain` or equivalent routing diagnostics.
+- [x] State side effects in help text for every mutating command.
+- [x] Ensure all CLI operations go through the daemon.
+- [x] Add CLI unit, snapshot, daemon-boundary, and exit-code tests.
 
 ## 8. Implement background-safe page interaction
 
@@ -412,11 +434,16 @@ Tab management alone is not enough for agents to complete browser tasks.
 
 - [ ] Define a page snapshot format suitable for agents.
 - [ ] Prefer an accessibility/semantic snapshot over raw full-page HTML.
-- [ ] Scope every page operation to an explicit stable tab ID.
+- [x] Scope every page operation to an explicit stable tab ID. The first exposed
+      operation, `pages.inspect`, resolves only the caller's stable tab ID; no
+      active-tab fallback exists.
 - [ ] Assign short-lived element references that are also scoped to tab and
       snapshot generation.
 - [ ] Return a stale-element error after navigation or DOM replacement.
-- [ ] Implement page URL, title, text, and load-state inspection.
+- [x] Implement page URL, title, text, and load-state inspection. A dedicated
+      packaged JSWindowActor passed the headed non-visible-Space proof with
+      bounded output and traversal; see
+      [the page interaction spike](../docs/spikes/page-interaction.md).
 - [ ] Implement semantic element lookup and query.
 - [ ] Implement click without activating the tab.
 - [ ] Implement fill and type without activating the tab.
@@ -441,104 +468,133 @@ Tab management alone is not enough for agents to complete browser tasks.
 
 Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 
-- [ ] Add an MCP stdio entry point.
-- [ ] Use the official current MCP SDK and pin a compatible version.
-- [ ] Expose capability/status discovery.
-- [ ] Expose Space and tab listing.
-- [ ] Expose tab resolution and background opening.
-- [ ] Expose explicit-ID navigation, reload, and close operations.
+- [x] Add an MCP stdio entry point.
+- [x] Use the official MCP SDK with exact compatible pins:
+      `@modelcontextprotocol/sdk` 1.30.0 and Zod 4.4.3. The transitive Hono
+      server is overridden to patched 2.0.12; the production audit is clean.
+- [x] Expose capability/status discovery.
+- [x] Expose Space and tab listing.
+- [x] Expose tab resolution and background opening.
+- [x] Expose explicit-ID navigation, reload, and close operations.
 - [ ] Expose the proven page snapshot and interaction operations.
-- [ ] Generate strict input and output schemas.
-- [ ] Include side-effect and safety information in every tool description.
-- [ ] Return structured ambiguity, stale-ID, unsupported-capability,
+- [x] Generate strict input and output schemas.
+- [x] Include side-effect and safety information in every tool description.
+- [x] Return structured ambiguity, stale-ID, unsupported-capability,
       unavailable-browser, timeout, and policy errors.
-- [ ] Keep routing and mutation policy in the daemon, not the MCP wrapper.
-- [ ] Do not add a wrapper-specific approval prompt.
-- [ ] Support clean shutdown when the host closes stdio.
-- [ ] Add MCP protocol tests for initialization, tool listing, every tool,
+- [x] Keep routing and mutation policy in the daemon, not the MCP wrapper.
+- [x] Do not add a wrapper-specific approval prompt.
+- [x] Support clean shutdown when the host closes stdio.
+- [x] Add MCP protocol tests for initialization, tool listing, every tool,
       malformed input, daemon errors, and shutdown.
-- [ ] Document configuration for Codex and other MCP-compatible terminal agents.
+- [x] Document configuration for Codex and other MCP-compatible terminal agents.
 
 ## 10. Multi-agent correctness
 
 - [ ] Define ownership and lease behavior for concurrent work on the same tab.
-- [ ] Decide whether reads can occur while another client mutates a tab.
-- [ ] Prevent duplicate tab creation across simultaneous agents.
+- [x] Decide whether reads can occur while another client mutates a tab. Safe
+      registry/status reads bypass the FIFO mutation queue and are covered by a
+      gated-mutation concurrency test.
+- [x] Prevent duplicate tab creation across simultaneous agents. Resolve/open
+      operations serialize around fresh discovery, with a two-client race test.
 - [ ] Prevent one agent from navigating or closing a tab another agent has
       leased unless explicitly forced.
-- [ ] Include client and operation IDs in sanitized diagnostics.
+- [x] Include client and operation IDs in sanitized diagnostics.
 - [ ] Add optimistic version checks to tab and snapshot mutations.
-- [ ] Make safe retries idempotent.
-- [ ] Add load and race tests with multiple CLI and MCP clients.
+- [x] Make safe retries idempotent. Retryable mutations require client-scoped
+      idempotency keys with bounded retention.
+- [ ] Add load and race tests with multiple CLI and MCP clients. The daemon has
+      a two-client resolve race; sustained mixed CLI/MCP load remains.
 
 ## 11. Security and privacy hardening
 
-- [ ] Write a threat model covering local clients, malicious pages, compromised
+- [x] Write a threat model covering local clients, malicious pages, compromised
       dependencies, remote-protocol exposure, extensions, and Native Messaging.
-- [ ] Ensure the browser protocol is never exposed on a non-loopback interface.
-- [ ] Authenticate or permission-gate the local daemon socket if filesystem
-      permissions are insufficient.
-- [ ] Minimize Zen extension permissions if an extension is required.
-- [ ] Define redaction rules for URLs, query strings, page text, form values,
-      headers, cookies, and downloaded filenames.
-- [ ] Keep secrets and browser-profile data out of crash reports.
-- [ ] Add maximum message, snapshot, and result sizes.
-- [ ] Add bounded timeouts and resource limits.
-- [ ] Validate every URL and reject unsupported or dangerous schemes.
-- [ ] Define behavior for `file:`, `data:`, `javascript:`, extension, and
+      See [docs/threat-model.md](../docs/threat-model.md).
+- [x] Ensure the browser protocol is never exposed on a non-loopback interface.
+      The chosen transport is Native Messaging plus a local Unix socket; no TCP
+      listener exists.
+- [x] Authenticate or permission-gate the local daemon socket if filesystem
+      permissions are insufficient. The daemon directory is owner-only `0700`
+      and its socket and lock are `0600`; moving it outside that boundary is
+      explicitly unsupported.
+- [x] Minimize Zen extension permissions if an extension is required. The
+      production add-on requests `nativeMessaging` only, plus the
+      `experiment_apis` declaration required for the privileged API.
+- [x] Define redaction rules for URLs, query strings, page text, form values,
+      headers, cookies, and downloaded filenames. The threat model permits
+      opaque IDs, counts, versions, capabilities, operation names, and error
+      codes while omitting browser and page content.
+- [x] Keep secrets and browser-profile data out of crash reports. Process entry
+      points now emit only bounded sanitized error classifications.
+- [x] Add maximum message, snapshot, and result sizes. Native chunks, daemon
+      frames, retained snapshots, JSON shapes, page inspection, and identifiers
+      all have enforced ceilings; see ADR 0003.
+- [x] Add bounded timeouts and resource limits.
+- [x] Validate every URL and reject unsupported or dangerous schemes.
+- [x] Define behavior for `file:`, `data:`, `javascript:`, extension, and
       browser internal URLs.
 - [ ] Define download and upload path boundaries.
-- [ ] Audit production and development dependencies continuously.
+- [x] Audit production and development dependencies continuously. The security
+      workflow and Dependabot remain enabled; the final production audit
+      reported zero vulnerabilities.
 - [ ] Add secret scanning and an appropriate static-analysis path if the
       repository's GitHub plan supports it.
-- [ ] Document that website-level destructive actions follow the calling agent's
-      policy; Zen Agent itself does not add a redundant allow prompt.
+- [x] Document that website-level destructive actions follow the calling agent's
+      policy; Zen Agent itself does not add a redundant allow prompt. Recorded
+      in the malicious-page boundary of the threat model.
 
 ## 12. Testing and safety verification
 
 - [ ] Set a coverage target for policy, resolver, daemon, CLI, and MCP code.
 - [ ] Add fixture sites for forms, navigation, frames, dialogs, downloads, and
       dynamic DOM replacement.
-- [ ] Add transport contract tests that can run without Zen.
-- [ ] Add macOS integration tests against an installed Zen Browser.
+- [x] Add transport contract tests that can run without Zen.
+- [x] Add macOS integration tests against an installed Zen Browser, gated by
+      `ZEN_SPIKE=1` and isolated in a fresh throwaway profile.
 - [ ] Add a repeatable daily-profile smoke test that does not modify user data.
-- [ ] Add a regression scenario with a selected YouTube/media tab.
-- [ ] Assert selected tab, focused window, visible Space, playback state, and
-      playback time before and after every background-operation scenario.
+- [x] Add a regression scenario with selected media playing continuously while
+      background operations run. The local audio fixture is deterministic and
+      avoids relying on YouTube availability.
+- [x] Assert selected tab, focused window, visible Space, playback state, and
+      playback time around the combined background open, move, navigate, reload,
+      inspect, and close scenario.
 - [ ] Test Personal and Work Space routing in separate windows and in the same
       window.
 - [ ] Test Zen restart, daemon restart, sleep/wake, network loss, crashed tabs,
       and stale IDs.
-- [ ] Test two agents operating concurrently.
+- [x] Test two agents operating concurrently. A two-client simultaneous resolve
+      race proves one open followed by one reuse.
 - [ ] Test large tab counts and long-running daemon behavior.
 - [ ] Test on every supported Zen and macOS version.
-- [ ] Keep environment-dependent Zen tests separate from portable unit/contract
+- [x] Keep environment-dependent Zen tests separate from portable unit/contract
       CI.
 
 ## 13. Documentation and diagnostics
 
-- [ ] Document Zen configuration and startup requirements.
-- [ ] Document how to identify and map Personal and Work Spaces.
-- [ ] Document installation, upgrade, and uninstall procedures.
-- [ ] Document CLI commands with JSON examples and exit codes.
-- [ ] Document every MCP tool with side effects and examples.
-- [ ] Document the daemon lifecycle and local files it creates.
-- [ ] Document privacy defaults, redaction, and log locations.
-- [ ] Add a troubleshooting guide for connection failures, unsupported Zen
+- [x] Document Zen configuration and startup requirements.
+- [x] Document how to identify and map Personal and Work Spaces.
+- [x] Document installation, upgrade, and uninstall procedures.
+- [x] Document CLI commands with JSON examples and exit codes.
+- [x] Document every current MCP tool with side effects and result examples.
+- [x] Document the daemon lifecycle and local files it creates.
+- [x] Document privacy defaults, redaction, and log locations.
+- [x] Add a troubleshooting guide for connection failures, unsupported Zen
       versions, stale tabs, ambiguous routing, and extension/native-host setup.
 - [ ] Add a diagnostic command that reports versions, capabilities, connection
       state, and sanitized configuration without exposing secrets.
-- [ ] Maintain a supported Zen/Firefox/macOS compatibility matrix.
-- [ ] Add architecture diagrams and decision records.
+- [x] Maintain a supported Zen/Firefox/macOS compatibility matrix.
+- [x] Add architecture diagrams and decision records.
 
 ## 14. Packaging and release readiness
 
 - [ ] Decide whether to publish to npm, distribute a standalone binary, provide
       a Homebrew formula, or use a combination.
-- [ ] Decide whether the CLI, daemon, and MCP entry point ship in one package.
-- [ ] Bundle production code and verify the executable works outside the
-      repository.
-- [ ] Package and register the Native Messaging host if the chosen transport
+- [x] Decide whether the CLI, daemon, and MCP entry point ship in one package.
+      The npm package contains all three executable entry points.
+- [x] Bundle production code and verify the executable works outside the
+      repository. A clean temporary install from the packed tarball passed CLI
+      and sanitized MCP startup smoke tests.
+- [x] Package and register the Native Messaging host if the chosen transport
       requires one.
 - [ ] Package and sign the Zen/Firefox extension if one is required.
 - [ ] Add semantic versioning and changelog automation.
@@ -546,7 +602,8 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 - [ ] Add macOS code signing/notarization if distributing native executables.
 - [ ] Add an upgrade path for configuration and daemon protocol versions.
 - [ ] Run a clean-machine install, upgrade, rollback, and uninstall test.
-- [ ] Publish nothing and deploy nothing until explicitly approved.
+- [x] Publish nothing and deploy nothing until explicitly approved. Only local
+      dry-run and temporary package-install verification were performed.
 
 ## MVP completion criteria
 
@@ -588,6 +645,17 @@ The first usable release is complete only when all of the following are true:
       both.** Nothing else can see a non-visible Space, and a native port is the
       only supported way to keep an MV3 event page alive. Both are now proven
       working together in a single add-on.
-- [ ] How should Space ambiguity be surfaced to terminal agents?
-- [ ] What is the smallest safe page-interaction surface for the first release?
-- [ ] Which Zen, Firefox, macOS, and Node versions will be supported initially?
+- [x] How should Space ambiguity be surfaced to terminal agents? As a structured
+      ambiguity error containing every equally safe candidate and a
+      machine-readable explanation; neither the daemon nor its CLI/MCP adapters
+      choose one.
+- [x] What is the smallest safe page-interaction surface for the first release?
+      [The page-interaction direction](../docs/spikes/page-interaction.md)
+      selects semantic snapshots and narrowly named operations scoped to
+      explicit tab/frame/generation IDs. Arbitrary evaluation, screenshots,
+      uploads, downloads, and dialogs stay unexposed until their individual
+      safety invariants are proven.
+- [x] Which Zen, Firefox, macOS, and Node versions will be supported initially?
+      Zen 1.21.9b / Gecko 153.0 on macOS 27.0 arm64 is the initial
+      headed-supported browser environment. Node 24+ is supported by the
+      portable CI gate; the headed proof ran on Node 26.5.0.

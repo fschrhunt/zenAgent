@@ -33,6 +33,11 @@ const METHODS = {
     browser.zenAgent.moveTab(params?.tabId, params?.zenSpaceUuid),
   "tabs.navigate": (params) =>
     browser.zenAgent.navigateTab(params?.tabId, params?.url),
+  "tabs.reload": (params) => browser.zenAgent.reloadTab(params?.tabId),
+  "pages.inspect": (params) =>
+    browser.zenAgent.inspectPage(params?.tabId, {
+      maxChars: params?.maxChars,
+    }),
   "tabs.close": (params) => browser.zenAgent.closeTab(params?.tabId),
 };
 

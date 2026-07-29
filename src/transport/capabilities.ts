@@ -13,6 +13,26 @@
 
 import { TransportProtocolError } from "./protocol.js";
 
+/**
+ * Browser builds whose privileged Zen internals have passed the complete
+ * headed transport proof.
+ *
+ * Match both versions exactly. The capability probe catches an internal that
+ * disappeared, while this allowlist catches the more dangerous case where an
+ * internal kept its name but changed semantics.
+ */
+export const SUPPORTED_ZEN_BUILDS = [
+  {
+    browserVersion: "1.21.9b",
+    geckoVersion: "153.0",
+  },
+] as const;
+
+export interface ZenBuildVersion {
+  readonly browserVersion: string;
+  readonly geckoVersion: string;
+}
+
 export const TRANSPORT_CAPABILITIES = [
   /** `gZenWorkspaces.getWorkspaces()` returns Spaces with uuid and name. */
   "zen.spaces.enumerate",
@@ -30,6 +50,8 @@ export const TRANSPORT_CAPABILITIES = [
   "browser.tabs.media-state",
   /** Per-window private-browsing state is observable. */
   "browser.windows.private",
+  /** Packaged JSWindowActor can inspect a loaded page without activation. */
+  "browser.pages.inspect",
 ] as const;
 
 export type TransportCapability = (typeof TRANSPORT_CAPABILITIES)[number];
@@ -75,6 +97,37 @@ export function hasCapability(
   capability: TransportCapability,
 ): boolean {
   return capabilities.includes(capability);
+}
+
+export function isSupportedZenBuild(build: ZenBuildVersion): boolean {
+  return SUPPORTED_ZEN_BUILDS.some(
+    (supported) =>
+      supported.browserVersion === build.browserVersion &&
+      supported.geckoVersion === build.geckoVersion,
+  );
+}
+
+/**
+ * Refuse builds that have not passed the headed safety proof.
+ *
+ * Zen's Space APIs are undocumented. Merely finding methods with the expected
+ * names does not prove that calling them still leaves focus, selection, and the
+ * visible Space unchanged, so an unknown version cannot safely degrade.
+ */
+export function assertSupportedZenBuild(build: ZenBuildVersion): void {
+  if (isSupportedZenBuild(build)) {
+    return;
+  }
+
+  const supported = SUPPORTED_ZEN_BUILDS.map(
+    (candidate) =>
+      `Zen ${candidate.browserVersion} / Gecko ${candidate.geckoVersion}`,
+  ).join(", ");
+
+  throw new TransportProtocolError(
+    "unsupported-capability",
+    `Zen ${build.browserVersion} / Gecko ${build.geckoVersion} has not passed Zen Agent's headed safety proof, so Zen Agent will not operate on it. Supported builds: ${supported}.`,
+  );
 }
 
 /**

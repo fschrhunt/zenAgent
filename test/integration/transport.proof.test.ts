@@ -63,6 +63,14 @@ describe.skipIf(!enabled || zen === undefined)(
       expect(proof.claims?.["routedTabNotSelected"]).toBe(true);
     });
 
+    it("inspects bounded visible text in the non-visible Space", () => {
+      expect(proof.claims?.["inspectionCapability"]).toBe(true);
+      expect(proof.claims?.["inspectedBackgroundUrl"]).toBe(true);
+      expect(proof.claims?.["inspectedBackgroundTitle"]).toBe(true);
+      expect(proof.claims?.["inspectedBoundedVisibleText"]).toBe(true);
+      expect(proof.claims?.["inspectionLeftTabUnselected"]).toBe(true);
+    });
+
     it("keeps a tab's identity across a Space change", () => {
       expect(proof.claims?.["moveChangedSpace"]).toBe(true);
       expect(proof.claims?.["identitySurvivesSpaceMove"]).toBe(true);
@@ -73,6 +81,7 @@ describe.skipIf(!enabled || zen === undefined)(
       expect(proof.claims?.["selectedTabUnchangedByOpen"]).toBe(true);
       expect(proof.claims?.["selectedTabUnchangedByMove"]).toBe(true);
       expect(proof.claims?.["selectedTabUnchangedByCycle"]).toBe(true);
+      expect(proof.claims?.["selectedMediaMutationRejected"]).toBe(true);
     });
 
     it("never takes focus", () => {

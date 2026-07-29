@@ -7,6 +7,12 @@
  * not determine arrives here as `null` and leaves as an explicit `unknown`.
  */
 
+import {
+  MAX_BROWSER_SPACES,
+  MAX_BROWSER_TABS,
+  MAX_BROWSER_WINDOWS,
+} from "../security/limits.js";
+import { MAX_BROWSER_URL_BYTES } from "../security/url-policy.js";
 import { TransportProtocolError } from "./protocol.js";
 
 export interface ZenSessionPayload {
@@ -89,6 +95,10 @@ const LOAD_STATES: readonly ZenLoadState[] = [
   "complete",
 ];
 
+const MAX_IDENTIFIER_BYTES = 4 * 1024;
+const MAX_DISPLAY_TEXT_BYTES = 64 * 1024;
+const MAX_CAPABILITIES = 256;
+
 function invalid(detail: string): never {
   throw new TransportProtocolError(
     "invalid-request",
@@ -100,21 +110,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function requireString(value: unknown, field: string): string {
+function requireString(
+  value: unknown,
+  field: string,
+  maxBytes = MAX_IDENTIFIER_BYTES,
+): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     invalid(`${field} must be a non-empty string.`);
+  }
+
+  if (Buffer.byteLength(value, "utf8") > maxBytes) {
+    invalid(`${field} exceeds the ${String(maxBytes)} byte limit.`);
   }
 
   return value;
 }
 
-function optionalString(value: unknown, field: string): string | null {
+function optionalString(
+  value: unknown,
+  field: string,
+  maxBytes = MAX_DISPLAY_TEXT_BYTES,
+): string | null {
   if (value === null || value === undefined) {
     return null;
   }
 
   if (typeof value !== "string") {
     invalid(`${field} must be a string or null.`);
+  }
+
+  if (Buffer.byteLength(value, "utf8") > maxBytes) {
+    invalid(`${field} exceeds the ${String(maxBytes)} byte limit.`);
   }
 
   return value;
@@ -157,6 +183,17 @@ function parseSession(value: unknown): ZenSessionPayload {
     invalid("session must be an object.");
   }
 
+  const capabilities = requireArray(
+    value["capabilities"],
+    "session.capabilities",
+  );
+
+  if (capabilities.length > MAX_CAPABILITIES) {
+    invalid(
+      `session.capabilities exceeds the ${String(MAX_CAPABILITIES)} item limit.`,
+    );
+  }
+
   return {
     profileId: requireString(value["profileId"], "session.profileId"),
     sessionId: requireString(value["sessionId"], "session.sessionId"),
@@ -165,13 +202,14 @@ function parseSession(value: unknown): ZenSessionPayload {
       "session.browserVersion",
     ),
     geckoVersion: requireString(value["geckoVersion"], "session.geckoVersion"),
-    capabilities: requireArray(
-      value["capabilities"],
-      "session.capabilities",
-    ).map((capability, index) =>
+    capabilities: capabilities.map((capability, index) =>
       requireString(capability, `session.capabilities[${String(index)}]`),
     ),
-    profileName: optionalString(value["profileName"], "session.profileName"),
+    profileName: optionalString(
+      value["profileName"],
+      "session.profileName",
+      MAX_DISPLAY_TEXT_BYTES,
+    ),
     isDefaultProfile: optionalBoolean(
       value["isDefaultProfile"],
       "session.isDefaultProfile",
@@ -186,7 +224,7 @@ function parseSpace(value: unknown, path: string): ZenSpacePayload {
 
   return {
     id: requireString(value["id"], `${path}.id`),
-    name: optionalString(value["name"], `${path}.name`),
+    name: optionalString(value["name"], `${path}.name`, MAX_DISPLAY_TEXT_BYTES),
     order: optionalNumber(value["order"], `${path}.order`),
     containerId: optionalString(value["containerId"], `${path}.containerId`),
   };
@@ -232,8 +270,12 @@ export function parseTabPayload(value: unknown, path = "tab"): ZenTabPayload {
   return {
     id: requireString(value["id"], `${path}.id`),
     spaceId: optionalString(value["spaceId"], `${path}.spaceId`),
-    url: optionalString(value["url"], `${path}.url`),
-    title: optionalString(value["title"], `${path}.title`),
+    url: optionalString(value["url"], `${path}.url`, MAX_BROWSER_URL_BYTES),
+    title: optionalString(
+      value["title"],
+      `${path}.title`,
+      MAX_DISPLAY_TEXT_BYTES,
+    ),
     loadState: (loadState ?? null) as ZenLoadState | null,
     selected: optionalBoolean(value["selected"], `${path}.selected`),
     soundPlaying: optionalBoolean(
@@ -252,14 +294,27 @@ function parseWindow(value: unknown, path: string): ZenWindowPayload {
     invalid(`${path} must be an object.`);
   }
 
+  const spaces = requireArray(value["spaces"], `${path}.spaces`);
+  const tabs = requireArray(value["tabs"], `${path}.tabs`);
+
+  if (spaces.length > MAX_BROWSER_SPACES) {
+    invalid(
+      `${path}.spaces exceeds the ${String(MAX_BROWSER_SPACES)} item limit.`,
+    );
+  }
+
+  if (tabs.length > MAX_BROWSER_TABS) {
+    invalid(`${path}.tabs exceeds the ${String(MAX_BROWSER_TABS)} item limit.`);
+  }
+
   return {
     id: requireString(value["id"], `${path}.id`),
     private: optionalBoolean(value["private"], `${path}.private`),
     focused: optionalBoolean(value["focused"], `${path}.focused`),
-    spaces: requireArray(value["spaces"], `${path}.spaces`).map(
-      (space, index) => parseSpace(space, `${path}.spaces[${String(index)}]`),
+    spaces: spaces.map((space, index) =>
+      parseSpace(space, `${path}.spaces[${String(index)}]`),
     ),
-    tabs: requireArray(value["tabs"], `${path}.tabs`).map((tab, index) =>
+    tabs: tabs.map((tab, index) =>
       parseTabPayload(tab, `${path}.tabs[${String(index)}]`),
     ),
   };
@@ -277,8 +332,14 @@ export function parseSnapshotPayload(value: unknown): ZenSnapshotPayload {
     invalid("the payload must be an object.");
   }
 
-  const windows = requireArray(value["windows"], "windows").map(
-    (window, index) => parseWindow(window, `windows[${String(index)}]`),
+  const rawWindows = requireArray(value["windows"], "windows");
+
+  if (rawWindows.length > MAX_BROWSER_WINDOWS) {
+    invalid(`windows exceeds the ${String(MAX_BROWSER_WINDOWS)} item limit.`);
+  }
+
+  const windows = rawWindows.map((window, index) =>
+    parseWindow(window, `windows[${String(index)}]`),
   );
 
   const windowIds = new Set<string>();
@@ -309,6 +370,25 @@ export function parseSnapshotPayload(value: unknown): ZenSnapshotPayload {
 
       tabIds.add(tab.id);
     }
+  }
+
+  const totalSpaces = windows.reduce(
+    (total, window) => total + window.spaces.length,
+    0,
+  );
+  const totalTabs = windows.reduce(
+    (total, window) => total + window.tabs.length,
+    0,
+  );
+
+  if (totalSpaces > MAX_BROWSER_SPACES) {
+    invalid(
+      `the snapshot exceeds the ${String(MAX_BROWSER_SPACES)} Space limit.`,
+    );
+  }
+
+  if (totalTabs > MAX_BROWSER_TABS) {
+    invalid(`the snapshot exceeds the ${String(MAX_BROWSER_TABS)} tab limit.`);
   }
 
   return {

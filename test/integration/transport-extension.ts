@@ -159,6 +159,23 @@ async function main() {
     JSON.stringify(selectedIds(snapshot)) === JSON.stringify(before.selected);
   note("routedTabSpace", spaceUuidOf(snapshot, routed));
 
+  // CLAIM: a packaged Zen Agent actor can inspect a loaded document in the
+  // non-visible Space without selecting it or relying on page timers.
+  const inspection = await transport.inspectPage(routedId, { maxChars: 80 });
+  note("backgroundInspection", inspection);
+  claims.inspectionCapability = transport.capabilities.includes(
+    "browser.pages.inspect",
+  );
+  claims.inspectedBackgroundUrl = inspection.url === origin + "/routed";
+  claims.inspectedBackgroundTitle = inspection.title === "actor target";
+  claims.inspectedBoundedVisibleText =
+    inspection.visibleText.includes("Background actor visible text") &&
+    !inspection.visibleText.includes("SHOULD NOT APPEAR") &&
+    inspection.visibleText.length <= 80;
+  claims.inspectionLeftTabUnselected =
+    JSON.stringify(selectedIds(await transport.snapshot())) ===
+    JSON.stringify(before.selected);
+
   // CLAIM: identity survives a Space change. The tab element is moved, not
   // recreated, and identity is a WeakMap keyed on that element.
   const spaceBeforeMove = spaceUuidOf(snapshot, routed);
@@ -201,6 +218,15 @@ async function main() {
     mediaTab !== undefined &&
     mediaTab.selected.status === "known" &&
     mediaTab.selected.value === true;
+  claims.selectedMediaMutationRejected = false;
+  if (mediaId !== undefined) {
+    try {
+      await transport.reloadTab(mediaId);
+    } catch (error) {
+      claims.selectedMediaMutationRejected =
+        error?.code === "policy-rejection";
+    }
+  }
   // Recorded as evidence, not asserted on: whether Gecko flags a tab as
   // emitting sound depends on window occlusion. The playback position measured
   // by the fixture server is the claim that actually holds.
@@ -214,6 +240,11 @@ async function main() {
   await sleep(2000);
   await transport.navigateTab(churnId, origin + "/churn2");
   await sleep(2000);
+  await transport.reloadTab(churnId);
+  await sleep(2000);
+  snapshot = await transport.snapshot();
+  claims.selectedTabUnchangedByReload =
+    JSON.stringify(selectedIds(snapshot)) === JSON.stringify(before.selected);
   await transport.closeTab(churnId);
   await sleep(2000);
   await mark("cycle-end");
@@ -296,11 +327,20 @@ function writeUserJs(profileDir: string, seederOutput: string): void {
   writeFileSync(join(profileDir, "user.js"), lines.join("\n") + "\n");
 }
 
-/** Packages `extension/` into an installable XPI, preserving `api/`. */
+/** Packages `extension/` into an installable XPI, preserving privileged code. */
 function buildExtensionXpi(destination: string): void {
   execFileSync(
     "/usr/bin/zip",
-    ["-r", "-X", "-q", destination, "manifest.json", "background.js", "api"],
+    [
+      "-r",
+      "-X",
+      "-q",
+      destination,
+      "manifest.json",
+      "background.js",
+      "api",
+      "actors",
+    ],
     { cwd: join(REPO, "extension") },
   );
 }
@@ -417,6 +457,16 @@ function startFixtureServer(): Promise<FixtureServer> {
     if (request.url === "/audio") {
       response.writeHead(200, { "content-type": "text/html" });
       response.end(audio);
+      return;
+    }
+
+    if (request.url === "/routed") {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html>
+<title>actor target</title>
+<p>Background actor visible text</p>
+<p hidden>SHOULD NOT APPEAR</p>
+<p>${"bounded ".repeat(40)}</p>`);
       return;
     }
 

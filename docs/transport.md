@@ -12,12 +12,16 @@ behind it is [ADR 0001](adr/0001-browser-transport.md); the evidence is
 ```text
 Zen Browser
   extension/api/parent.js     privileged chrome JS: gZenWorkspaces, gBrowser
+  extension/actors/           bounded HTTP(S) page inspection, no page timers
   extension/background.js     event page, holds the native port open
         │  native messaging (uint32 LE length + UTF-8 JSON, over stdio)
         ▼
-  src/native/host.ts          the host process Zen launches
+  src/native/daemon-host.ts   native host and shared daemon, one process
   src/transport/client.ts     request correlation, snapshots, deltas
   src/browser/registry.ts     the live model
+        │  versioned local socket protocol
+        ▼
+  CLI and MCP clients
 ```
 
 The extension is where the whole architecture earns its keep.
@@ -43,6 +47,13 @@ free. Zen permits this at all only because it ships
 `MOZ_REQUIRE_SIGNING: false`, which makes `AddonSettings.EXPERIMENTS_ENABLED` a
 live preference rather than frozen `false` as on stock Firefox Release.
 
+This source checkout does not yet include a release-quality extension installer
+or signed package. The headed harness creates an XPI from `extension/` and
+installs it only into a throwaway profile. A developer evaluating a real profile
+must package or temporarily load that directory themselves and must make the
+preference changes knowingly. Do not copy the integration harness's profile
+seeding procedure into a daily profile.
+
 The native host manifest belongs at
 
 ```text
@@ -52,6 +63,42 @@ The native host manifest belongs at
 Not a `.../Zen/` path. Zen does not patch Firefox's manifest directory, despite
 third-party installers guessing otherwise. `allowed_extensions` is restricted to
 Zen Agent's own add-on id, because this host bridges to a privileged API.
+
+### Install and uninstall
+
+Build first, then run the installer through the built CLI:
+
+```sh
+npm run build
+node dist/cli.js native-host install
+```
+
+The installer creates:
+
+```text
+~/Library/Application Support/Zen Agent/zen-agent-host
+~/Library/Application Support/Mozilla/NativeMessagingHosts/to.nodus.zen_agent.json
+```
+
+The first file is an owner-executable launcher (`0700`) that pins the absolute
+Node and built host-module paths. The manifest is owner-readable (`0600`) and
+points to that launcher. Both are per-user files; installation needs no
+elevation.
+
+The installer preflights both destinations and uses exclusive file creation, so
+it never replaces an existing manifest or launcher. If either path already
+exists, inspect it instead of deleting it blindly. To upgrade a source checkout,
+uninstall the files owned by the previous build and install again after
+rebuilding:
+
+```sh
+node dist/cli.js native-host uninstall
+npm run build
+node dist/cli.js native-host install
+```
+
+Uninstall validates both files before removing either. A file that is invalid,
+hand-edited, or not recognisably owned by Zen Agent is preserved and reported.
 
 ## Identity
 
@@ -93,7 +140,24 @@ originally implied. `src/transport/chunking.ts` splits oversized outbound
 messages and reassembles them, slicing on byte boundaries rather than string
 indices so that a multi-byte character straddling a chunk survives.
 
-## Capability detection
+## Supported builds and capability detection
+
+The transport fails closed unless the browser reports an exact Zen/Gecko pair
+that has passed the complete headed safety proof:
+
+| Zen     | Gecko | Status    | Headed evidence environment                   |
+| ------- | ----- | --------- | --------------------------------------------- |
+| 1.21.9b | 153.0 | Supported | macOS 27.0 arm64, Node 26.5.0; 4 passing runs |
+
+Portable unit and contract tests also run on Node 24 in CI. Zen Agent requires
+Node 24 or newer.
+
+An unlisted Zen or Gecko version is refused before the first browser snapshot or
+mutation, even if it reports every known capability. Adding a build to the table
+and `SUPPORTED_ZEN_BUILDS` requires a passing headed `npm run spike:transport`
+run on that exact pair. This is deliberately stricter than semantic-version
+matching: Zen's privileged APIs are undocumented, and a method can keep its name
+while changing behavior.
 
 The extension probes for each Zen internal it depends on and reports what it
 actually found. The host refuses to call anything it was not told is present,
@@ -113,19 +177,22 @@ application, session replacement, and the host's connect-and-reconcile loop.
 
 Everything else is covered by `npm run spike:transport`, which runs
 `test/integration/transport.proof.test.ts` headed against a real Zen on a
-throwaway profile. Measured on Zen 1.21.9b / Gecko 153.0 / macOS 27.0 arm64, and
-green on three consecutive runs:
+throwaway profile. Measured on Zen 1.21.9b / Gecko 153.0 / macOS 27.0 arm64. The
+latest expanded proof, including dedicated-actor inspection and background
+reload, passed 10/10 in 23.44 seconds; the transport had also passed four
+earlier headed runs before that surface was added:
 
-| Claim                                                        | Evidence                                                                                                                            |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Zen loads an MV3 add-on that also declares `experiment_apis` | All eight capabilities detected. DEV-261 had only proved the two halves separately.                                                 |
-| Tabs in a non-visible Space are enumerated                   | Tabs seen in both Spaces at once — the failure that disqualified BiDi                                                               |
-| A background tab opens in a requested Space                  | Routed tab present, in the requested Space, not selected                                                                            |
-| **Identity survives a Space change**                         | The same identifier before and after `moveTab` moved it between Spaces, and every identifier from the first snapshot still resolved |
-| The selected tab never changes                               | Unchanged across open, route, move, navigate, and close                                                                             |
-| Focus is never taken                                         | Frontmost macOS application unchanged across the whole run                                                                          |
-| A playing tab is not interrupted                             | Playback position advanced 11.19s → 16.71s across the agent's open/navigate/close cycle, and never rewound                          |
-| Privileged schemes are refused                               | `javascript:`, `file:` and `data:` all refused                                                                                      |
+| Claim                                                        | Evidence                                                                                                                             |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Zen loads an MV3 add-on that also declares `experiment_apis` | All nine capabilities detected. DEV-261 had only proved the two halves separately.                                                   |
+| Tabs in a non-visible Space are enumerated                   | Tabs seen in both Spaces at once — the failure that disqualified BiDi                                                                |
+| A background tab opens in a requested Space                  | Routed tab present, in the requested Space, not selected                                                                             |
+| **Identity survives a Space change**                         | The same identifier before and after `moveTab` moved it between Spaces, and every identifier from the first snapshot still resolved  |
+| The selected tab never changes                               | Unchanged across open, route, move, navigate, and close                                                                              |
+| Focus is never taken                                         | Frontmost macOS application unchanged across the whole run                                                                           |
+| A playing tab is not interrupted                             | Playback position advanced 11.19s → 16.71s across the agent's open/navigate/close cycle, and never rewound                           |
+| Privileged schemes are refused                               | `javascript:`, `file:` and `data:` all refused                                                                                       |
+| A non-visible page can be inspected without activation       | Dedicated packaged actor returned bounded visible text, title, URL, and load state; hidden text was excluded and selection unchanged |
 
 Focus is checked two ways, because the model's own `focused` field only compares
 Zen windows to each other: the run also asks macOS which application is
@@ -151,9 +218,6 @@ user has never looked at.
 
 ## Still open
 
-- Recording the Zen versions the capability probe has passed on, so unknown
-  builds fail closed rather than optimistically.
-- An installer that writes the native host manifest.
 - Whether macOS window occlusion breaks background operation more broadly. The
   `soundPlaying` flakiness above is the first evidence that it affects
   something.

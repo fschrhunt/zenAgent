@@ -83,4 +83,21 @@ describe("native messaging framing", () => {
 
     expect(() => decoder.push(frame)).toThrow(FramingError);
   });
+
+  it("does not copy malformed frame contents into its error", () => {
+    const secret = '{"token":"top-secret",broken}';
+    const body = Buffer.from(secret);
+    const frame = Buffer.alloc(MESSAGE_HEADER_BYTES + body.length);
+    frame.writeUInt32LE(body.length, 0);
+    body.copy(frame, MESSAGE_HEADER_BYTES);
+
+    try {
+      new MessageDecoder().push(frame);
+      throw new Error("expected framing rejection");
+    } catch (error) {
+      expect(error).toBeInstanceOf(FramingError);
+      expect(String(error)).not.toContain("top-secret");
+      expect(String(error)).not.toContain(secret);
+    }
+  });
 });

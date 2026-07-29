@@ -129,6 +129,23 @@ function connectedTransport(handlers: Record<string, Handler> = {}): {
 }
 
 describe("ZenTransport", () => {
+  it("bounds configured request deadlines", () => {
+    const extension = fakeExtension({});
+
+    expect(
+      () =>
+        new ZenTransport(extension.connection, {
+          requestTimeoutMs: 0,
+        }),
+    ).toThrow(/request timeout/);
+    expect(
+      () =>
+        new ZenTransport(extension.connection, {
+          requestTimeoutMs: 10 * 60_000,
+        }),
+    ).toThrow(/request timeout/);
+  });
+
   it("handshakes and returns a first snapshot", async () => {
     const { transport, extension } = connectedTransport();
     const snapshot = await transport.connect();
@@ -153,6 +170,21 @@ describe("ZenTransport", () => {
     await expect(transport.connect()).rejects.toThrow(
       /zen\.tabs\.enumerate-all-spaces/,
     );
+  });
+
+  it("refuses an unproven browser build before requesting a snapshot", async () => {
+    const { transport, extension } = connectedTransport({
+      "session.describe": () => ({
+        ...snapshotPayload().session,
+        browserVersion: "1.22.0b",
+        capabilities: allCapabilities,
+      }),
+    });
+
+    await expect(transport.connect()).rejects.toThrow(
+      /Zen 1\.22\.0b .* has not passed/,
+    );
+    expect(extension.methodsCalled).toEqual(["session.describe"]);
   });
 
   it("advances the sequence across snapshots so the registry accepts them", async () => {
@@ -274,6 +306,51 @@ describe("ZenTransport", () => {
     ).rejects.toThrow(TransportProtocolError);
   });
 
+  it("rejects privileged URLs before sending a browser mutation", async () => {
+    const { transport, extension } = connectedTransport({
+      "tabs.open": () => ({ tabId: "should-not-open" }),
+      "tabs.navigate": () => ({}),
+    });
+    await transport.connect();
+    const before = [...extension.methodsCalled];
+
+    await expect(
+      transport.openTab({ url: "file:///Users/example/private.txt" }),
+    ).rejects.toThrow(/Only HTTP and HTTPS/);
+    await expect(
+      transport.navigateTab("tab-1", "javascript:alert(1)"),
+    ).rejects.toThrow(/Only HTTP and HTTPS/);
+    expect(extension.methodsCalled).toEqual(before);
+  });
+
+  it("rejects embedded URL credentials without copying them into errors", async () => {
+    const { transport } = connectedTransport();
+    await transport.connect();
+    const secret = "https://user:top-secret@example.com/";
+
+    try {
+      await transport.navigateTab("tab-1", secret);
+      throw new Error("expected navigation refusal");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TransportProtocolError);
+      expect(String(error)).not.toContain("top-secret");
+      expect(String(error)).not.toContain(secret);
+    }
+  });
+
+  it("bounds explicit transport identifiers before sending", async () => {
+    const { transport, extension } = connectedTransport({
+      "tabs.close": () => ({}),
+    });
+    await transport.connect();
+    const before = [...extension.methodsCalled];
+
+    await expect(transport.closeTab("x".repeat(5_000))).rejects.toThrow(
+      /between 1 and 4096 bytes/,
+    );
+    expect(extension.methodsCalled).toEqual(before);
+  });
+
   it("surfaces a structured error from the extension", async () => {
     const extension = fakeExtension({
       "session.describe": () => describeResult(allCapabilities),
@@ -288,6 +365,70 @@ describe("ZenTransport", () => {
     await expect(transport.closeTab("tab-1")).rejects.toThrow(
       TransportProtocolError,
     );
+  });
+
+  it("reloads only the tab named by stable identifier", async () => {
+    let reloaded: unknown;
+    const { transport, extension } = connectedTransport({
+      "tabs.reload": (params) => {
+        reloaded = params;
+        return {};
+      },
+    });
+    await transport.connect();
+
+    await transport.reloadTab("tab-1");
+
+    expect(reloaded).toEqual({ tabId: "tab-1" });
+    expect(extension.methodsCalled.at(-1)).toBe("tabs.reload");
+  });
+
+  it("inspects bounded page content only through an explicit tab ID", async () => {
+    let inspected: unknown;
+    const { transport, extension } = connectedTransport({
+      "pages.inspect": (params) => {
+        inspected = params;
+        return {
+          url: "https://example.com/",
+          title: "Example",
+          loadState: "complete",
+          visibleText: "bounded text",
+          truncated: false,
+          visitedTextNodes: 2,
+        };
+      },
+    });
+    await transport.connect();
+
+    await expect(
+      transport.inspectPage("tab-1", { maxChars: 64 }),
+    ).resolves.toMatchObject({
+      visibleText: "bounded text",
+      visitedTextNodes: 2,
+    });
+    expect(inspected).toEqual({ tabId: "tab-1", maxChars: 64 });
+    expect(extension.methodsCalled.at(-1)).toBe("pages.inspect");
+  });
+
+  it("rejects invalid or oversized page inspection results", async () => {
+    const { transport } = connectedTransport({
+      "pages.inspect": () => ({
+        url: "https://example.com/",
+        title: "Example",
+        loadState: "complete",
+        visibleText: "too long",
+        truncated: true,
+        visitedTextNodes: 1,
+      }),
+    });
+    await transport.connect();
+
+    await expect(
+      transport.inspectPage("tab-1", { maxChars: 4 }),
+    ).rejects.toThrow(/invalid or unbounded/);
+    await expect(
+      transport.inspectPage("tab-1", { maxChars: 10_001 }),
+    ).rejects.toThrow(/1 through 10000/);
   });
 
   it("times out a request the extension never answers", async () => {
