@@ -163,38 +163,66 @@ export function assertSafeToAttach(profileDir: string): void {
   );
 }
 
+export interface LaunchDailyOptions {
+  /**
+   * Start the WebDriver BiDi remote agent on this port.
+   *
+   * Omit it. Under ADR 0001 the transport is an in-browser extension, which
+   * needs no remote protocol, so a plain launch is the normal case. Passing a
+   * port opts into the rejected BiDi path and everything that comes with it: a
+   * robot icon in the URL bar for the whole browser run, and the preference
+   * rewriting that `assertSafeToAttach` guards against.
+   */
+  readonly remoteDebuggingPort?: number;
+  readonly profileDir?: string;
+}
+
 /**
- * Launches the user's own Zen with the remote agent enabled.
+ * Launches the user's own Zen -- the pinned application, on their default
+ * profile.
  *
- * Uses `open -a`, so this is the same application and Dock tile the user
- * already has, on their default profile. It deliberately refuses to run when
- * Zen is already up: a second `open` would only activate the existing window,
- * and the remote agent cannot be armed after startup anyway.
+ * Uses `open -a`, which hands the launch to LaunchServices so it binds to the
+ * Dock tile the user already has. Executing the binary directly would register
+ * a separate application and add a second tile, which is what happened during
+ * this spike.
  *
- * Note that while the agent is listening, Zen shows a robot icon in the URL
- * bar. That is `gRemoteControl` in browser.js and it cannot be suppressed --
- * the pref that hides it is also gated on `Cu.isInAutomation`.
+ * Refuses to run when Zen is already up: `open` would only activate the
+ * existing window, and with the extension transport there is nothing to attach
+ * anyway.
  */
-export function launchDailyZen(port: number, profileDir?: string): void {
-  const profile = profileDir ?? resolveDefaultProfile();
-  if (profile === undefined) {
-    throw new Error("Could not resolve the default Zen profile.");
+export function launchDailyZen(options: LaunchDailyOptions = {}): void {
+  const { remoteDebuggingPort } = options;
+
+  if (remoteDebuggingPort !== undefined) {
+    const profile = options.profileDir ?? resolveDefaultProfile();
+    if (profile === undefined) {
+      throw new Error("Could not resolve the default Zen profile.");
+    }
+    assertSafeToAttach(profile);
   }
-  assertSafeToAttach(profile);
 
   const running = findRunningZen();
   if (running !== undefined) {
     throw new Error(
-      `Zen is already running (pid ${String(running)}). The remote agent can ` +
-        `only be enabled at startup, so it must be quit and relaunched.`,
+      `Zen is already running (pid ${String(running)}); nothing to launch.`,
     );
   }
 
+  const args =
+    remoteDebuggingPort === undefined
+      ? ["-a", ZEN_APP]
+      : [
+          "-a",
+          ZEN_APP,
+          "--args",
+          "--remote-debugging-port",
+          String(remoteDebuggingPort),
+        ];
+
   // Detached, because `open` returns as soon as the app is handed off.
-  const child = spawn(
-    "/usr/bin/open",
-    ["-a", ZEN_APP, "--args", "--remote-debugging-port", String(port)],
-    { stdio: "ignore", detached: true },
-  );
+  const child = spawn("/usr/bin/open", args, {
+    stdio: "ignore",
+    detached: true,
+  });
   child.unref();
 }
