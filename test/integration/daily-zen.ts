@@ -136,14 +136,52 @@ export function inspectDailyZen(profileDir?: string): DailyZenState {
 }
 
 /**
+ * Refuses to attach to a profile that has not opted out of "recommended" prefs.
+ *
+ * Starting the remote agent against a real profile makes
+ * `RecommendedPreferences` write ~87 preferences onto the **user** branch,
+ * including turning off Safe Browsing, the password manager, breach alerts and
+ * extension updates. They are only reverted on `xpcom-shutdown`, and in
+ * practice they survived a clean quit and had to be removed by hand.
+ *
+ * `remote.prefs.recommended = false` makes `applyPreferences()` return before
+ * writing anything, so it has to be set *before* the first attach. This is a
+ * hard precondition, not advice.
+ */
+export function assertSafeToAttach(profileDir: string): void {
+  const prefs = join(profileDir, "prefs.js");
+  const contents = existsSync(prefs) ? readFileSync(prefs, "utf8") : "";
+  if (/user_pref\("remote\.prefs\.recommended",\s*false\)/.test(contents)) {
+    return;
+  }
+
+  throw new Error(
+    `Refusing to attach to ${profileDir}: "remote.prefs.recommended" is not ` +
+      `set to false. Attaching would rewrite ~87 preferences on this profile, ` +
+      `including disabling Safe Browsing and the password manager. Set it in ` +
+      `about:config (or in prefs.js while Zen is closed) and try again.`,
+  );
+}
+
+/**
  * Launches the user's own Zen with the remote agent enabled.
  *
  * Uses `open -a`, so this is the same application and Dock tile the user
  * already has, on their default profile. It deliberately refuses to run when
  * Zen is already up: a second `open` would only activate the existing window,
  * and the remote agent cannot be armed after startup anyway.
+ *
+ * Note that while the agent is listening, Zen shows a robot icon in the URL
+ * bar. That is `gRemoteControl` in browser.js and it cannot be suppressed --
+ * the pref that hides it is also gated on `Cu.isInAutomation`.
  */
-export function launchDailyZen(port: number): void {
+export function launchDailyZen(port: number, profileDir?: string): void {
+  const profile = profileDir ?? resolveDefaultProfile();
+  if (profile === undefined) {
+    throw new Error("Could not resolve the default Zen profile.");
+  }
+  assertSafeToAttach(profile);
+
   const running = findRunningZen();
   if (running !== undefined) {
     throw new Error(
