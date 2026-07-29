@@ -176,24 +176,25 @@ proven items are re-runnable with `npm run spike:transport`.
 
 Tracking: [DEV-262](https://linear.app/intuitum/issue/DEV-262)
 
-- [ ] Define types for browser sessions, profiles, windows, Spaces, tabs,
+- [x] Define types for browser sessions, profiles, windows, Spaces, tabs,
       browsing contexts, frames, and elements.
-- [ ] Store the transport's stable IDs without inventing identity from tab
+- [x] Store the transport's stable IDs without inventing identity from tab
       position or title.
-- [ ] Track URL, title, load state, selected state, focused state, media state,
+- [x] Track URL, title, load state, selected state, focused state, media state,
       container identity, Space identity, and private-window status when the
       transport exposes them.
-- [ ] Keep selected/focused state read-only unless an explicitly named future
+- [x] Keep selected/focused state read-only unless an explicitly named future
       operation requires changing it.
-- [ ] Model unknown and unsupported properties explicitly instead of fabricating
+- [x] Model unknown and unsupported properties explicitly instead of fabricating
       values.
-- [ ] Define snapshot and incremental event schemas for the live registry.
-- [ ] Define stale-ID behavior after close, crash, reconnect, and browser
+- [x] Define snapshot and incremental event schemas for the live registry.
+- [x] Define stale-ID behavior after close, crash, reconnect, and browser
       restart.
-- [ ] Define how multiple Zen windows and multiple profiles are represented.
-- [ ] Decide whether private windows are unsupported, hidden by default, or
-      require explicit configuration.
-- [ ] Add unit tests for identity, lifecycle transitions, stale IDs, multiple
+- [x] Define how multiple Zen windows and multiple profiles are represented.
+- [x] Decide whether private windows are unsupported, hidden by default, or
+      require explicit configuration. Private windows are hidden by default;
+      unknown private state is also excluded.
+- [x] Add unit tests for identity, lifecycle transitions, stale IDs, multiple
       windows, and incomplete transport data.
 
 ## 3. Implement configuration and Personal/Work routing
