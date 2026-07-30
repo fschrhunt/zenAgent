@@ -5,11 +5,11 @@
 <br />
 <br />
 
-**A considerate, space-aware MCP server for background automation in
-[Zen Browser](https://zen-browser.app/), with a guided setup wizard.**
+**Make Agent Browsing Chill.**
 
-Built for terminal-native agents that need to use the browser without taking
-over the window you are actively working in.
+Zen Agent lets your agents use [Zen Browser](https://zen-browser.app/) quietly
+in the background, so the window you are working in stays exactly where you left
+it. A guided wizard walks you through setup.
 
 </div>
 
@@ -50,10 +50,9 @@ artifact.
 
 Agents that drive a browser usually steal it. They raise a window, jump you to a
 different Space, and pull focus mid-sentence. Zen Agent does the opposite: it
-looks before it opens, reuses what is already there, and stays in the
-background.
+looks before it opens, reuses what is already there, and stays out of your way.
 
-## Principles
+## How it behaves
 
 |                 |                                                                                 |
 | --------------- | ------------------------------------------------------------------------------- |
@@ -66,7 +65,9 @@ background.
 
 ## Status
 
-**Prototype, with the background transport proven on one exact browser build.**
+**Early days: a working prototype, with the background transport proven on one
+exact browser build.**
+
 The browser model, native-host daemon, configuration and routing policy, tab
 resolver, setup CLI, and stdio MCP adapter are implemented and covered by
 portable tests. The headed proof can enumerate tabs in non-visible Spaces and
