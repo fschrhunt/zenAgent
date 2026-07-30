@@ -34,7 +34,7 @@ process.stdout.write(`# typed: strict
 
 # ZenAgent installs the Zen Agent CLI, native host, and MCP server.
 class ZenAgent < Formula
-  desc "Considerate, space-aware CLI and MCP server for Zen Browser"
+  desc "Chill, Space-aware CLI and MCP server for Zen Browser"
   homepage "https://github.com/fschrhunt/zen-agent"
   url "${tarballUrl}"
   sha256 "${sha256}"
