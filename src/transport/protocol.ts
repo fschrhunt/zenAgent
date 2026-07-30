@@ -23,6 +23,12 @@ export type TransportErrorCode =
   | "invalid-request"
   /** The identifier referred to a tab, Space, or window that is gone. */
   | "stale-id"
+  /** The top-level page document was replaced after a reference was minted. */
+  | "stale-document"
+  /** A child frame detached or navigated after a reference was minted. */
+  | "stale-frame"
+  /** A referenced node disconnected or its short-lived snapshot expired. */
+  | "stale-element"
   /** The operation did not complete within its deadline. */
   | "timeout"
   /** The result could not be delivered within the message size limits. */
@@ -38,6 +44,9 @@ export const TRANSPORT_ERROR_CODES: readonly TransportErrorCode[] = [
   "browser-unavailable",
   "invalid-request",
   "stale-id",
+  "stale-document",
+  "stale-frame",
+  "stale-element",
   "timeout",
   "payload-too-large",
   "policy-rejection",
@@ -99,6 +108,23 @@ export const TRANSPORT_METHODS = [
   "session.describe",
   "browser.snapshot",
   "pages.inspect",
+  "pages.snapshot",
+  "pages.query",
+  "pages.click",
+  "pages.fill",
+  "pages.type",
+  "pages.press",
+  "pages.select",
+  "pages.check",
+  "pages.uncheck",
+  "pages.submit",
+  "pages.upload",
+  "pages.media.list",
+  "pages.media.fetch",
+  "pages.resource.fetch",
+  "pages.screenshot",
+  "pages.back",
+  "pages.forward",
   "tabs.open",
   "tabs.navigate",
   "tabs.reload",

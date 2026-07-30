@@ -104,12 +104,19 @@ Controls:
 - Keep returned content structurally separate from tool metadata and diagnostic
   messages.
 - Never place page content in logs by default.
-- Scope element references to tab and snapshot generation; reject stale
-  references after navigation or DOM replacement.
+- Scope page snapshots and element references to daemon client, tab, document,
+  frame, and snapshot generation; reject cross-client and stale references.
+- Require an exclusive client-owned tab lease for every page mutation. Release
+  leases and page ownership when the client disconnects; use bounded expiry only
+  as a crash fallback.
 - Bound page result sizes, operation times, frame traversal, and retries.
-- Keep the first page surface read-only and require an explicit stable tab ID.
-  The dedicated actor accepts HTTP(S) documents only, visits at most 10,000 text
-  nodes, and returns at most 10,000 text characters.
+- Require an explicit stable tab ID for every page read. The first proven
+  surface remains bounded read-only inspection: the dedicated actor accepts
+  HTTP(S) documents only, visits at most 10,000 text nodes, and returns at most
+  10,000 text characters.
+- Keep semantic interaction capability-gated until its complete headed proof
+  passes. Use DOM-only operations and never fall back to activation or native OS
+  input when a site requires trusted events.
 
 Website-level destructive actions remain governed by the calling agent's policy.
 Zen Agent does not add a redundant general approval prompt, but it also does not
@@ -128,10 +135,13 @@ Controls:
   unknown schemes.
 - Parse URLs before mutation and do not recover from parse failure by treating
   input as search text.
-- File uploads require an explicit caller-provided absolute path and a future
-  documented boundary policy.
-- Downloads require an explicit destination policy and never silently choose a
-  profile or repository directory.
+- File uploads require explicit caller-provided absolute paths on every call.
+  The daemon accepts only bounded regular files opened without following
+  symlinks, stages opaque owner-only copies, and releases them with their
+  client, tab, or lease. It never opens a picker or logs a path.
+- Downloads use only the configured destination, defaulting to the user's
+  Downloads folder. They are bounded same-origin HTTP(S) fetches, publish with
+  collision-safe no-overwrite semantics, and never use Firefox download UI.
 
 ### Zen internal API drift
 
@@ -218,7 +228,11 @@ identify domains, URLs, filenames, or users across operations.
 - macOS window occlusion may affect more browser state than the observed media
   flag.
 - Daemon client authentication beyond filesystem permissions is not yet chosen.
-- Upload and download path boundaries are not yet defined.
-- The first page-interaction surface is bounded read-only inspection. Semantic
-  element operations, cross-origin frames, trusted input, screenshots, and
-  whether arbitrary evaluation is exposed remain open.
+- Same-user callers retain the filesystem authority they already have. Explicit
+  upload paths do not create a sandbox boundary around Documents or another
+  caller-readable directory.
+- Credentialed resource fetches can disclose content to the requesting local
+  client. Same-origin and byte bounds reduce but do not eliminate that risk.
+- Dialogs, private-window access, trusted input, browser permission UI,
+  arbitrary popups, and arbitrary evaluation remain unsupported. Closed shadow
+  roots are reported as boundaries but their contents remain unobservable.

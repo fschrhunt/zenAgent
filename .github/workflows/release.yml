@@ -15,9 +15,41 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  speech-helper:
+    name: Build on-device speech helper
+    if: github.repository == 'fschrhunt/zen-agent'
+    runs-on: macos-26
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Build and verify the macOS 26 helper
+        run: |
+          npm ci --ignore-scripts
+          npm run speech:build
+
+      - name: Transfer the verified helper to packaging
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zen-agent-speech
+          path: dist/native/zen-agent-speech
+          if-no-files-found: error
+
   release:
     name: Build ${{ github.event.release.tag_name }}
     if: github.repository == 'fschrhunt/zen-agent'
+    needs: speech-helper
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -46,6 +78,15 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
+
+      - name: Receive the verified macOS speech helper
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: zen-agent-speech
+          path: dist/native
+
+      - name: Restore executable mode
+        run: chmod 0755 dist/native/zen-agent-speech
 
       - name: Run project checks
         run: npm run check

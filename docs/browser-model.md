@@ -32,7 +32,11 @@ Transport-dependent fields use an explicit three-way observation:
 
 This applies to selected and focused state as well as URLs, titles, loading,
 media, container, Space, and private-window state. Selected and focused state is
-read-only in this model.
+read-only in this model. The privileged Zen transport may report either value as
+`known` only when it also reports the corresponding `browser.tabs.selected` or
+`browser.windows.focused` capability. A transport without that named observation
+capability must preserve `unknown` or `unsupported`; it may not infer the value
+from page visibility or another proxy.
 
 ## Snapshots and deltas
 

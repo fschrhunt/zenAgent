@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ACCEPTED_CAPABILITY_BUILDS,
+  acceptedCapabilities,
   assertRequiredCapabilities,
   assertSupportedZenBuild,
+  isCapabilityAcceptedOnBuild,
   isSupportedZenBuild,
   knownCapabilities,
   requireCapability,
+  TRANSPORT_CAPABILITIES,
 } from "../../src/transport/capabilities.js";
 import {
   MAX_BROWSER_TABS,
@@ -208,6 +212,35 @@ describe("capabilities", () => {
     expect(
       knownCapabilities(["zen.spaces.route", "zen.invented.capability"]),
     ).toEqual(["zen.spaces.route"]);
+  });
+
+  it("requires an explicit exact-build acceptance entry for every capability", () => {
+    expect(Object.keys(ACCEPTED_CAPABILITY_BUILDS).sort()).toEqual(
+      [...TRANSPORT_CAPABILITIES].sort(),
+    );
+    expect(
+      TRANSPORT_CAPABILITIES.every((capability) =>
+        isCapabilityAcceptedOnBuild(capability, {
+          browserVersion: "1.21.9b",
+          geckoVersion: "153.0",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("filters each reported capability through its own exact build gate", () => {
+    expect(
+      acceptedCapabilities(
+        ["browser.pages.upload", "browser.pages.screenshot"],
+        { browserVersion: "1.21.9b", geckoVersion: "154.0" },
+      ),
+    ).toEqual([]);
+    expect(
+      acceptedCapabilities(
+        ["browser.pages.upload", "zen.invented.capability"],
+        { browserVersion: "1.21.9b", geckoVersion: "153.0" },
+      ),
+    ).toEqual(["browser.pages.upload"]);
   });
 
   it("names the Zen version when a required capability is missing", () => {

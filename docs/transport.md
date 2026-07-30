@@ -12,7 +12,7 @@ behind it is [ADR 0001](adr/0001-browser-transport.md); the evidence is
 ```text
 Zen Browser
   extension/api/parent.js     privileged chrome JS: gZenWorkspaces, gBrowser
-  extension/actors/           bounded HTTP(S) page inspection, no page timers
+  extension/actors/           bounded HTTP(S) inspection and semantic page actor
   extension/background.js     event page, holds the native port open
         │  native messaging (uint32 LE length + UTF-8 JSON, over stdio)
         ▼
@@ -122,12 +122,12 @@ does not derive identity from position or title.
 
 The transport reports `unknown` or `unsupported` rather than guessing:
 
-| Field                  | Status                                                                                                                                               |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mediaState`           | Only ever `playing`. Sound state cannot separate "no media" from "paused", and the invariant that matters is not interrupting a tab that is playing. |
-| `browsingContextId`    | `unsupported`. Browsing contexts belong to a page-level transport; ADR 0001 leaves that door open for BiDi later.                                    |
-| `url` on a lazy tab    | `unknown: not-loaded`, which is a different situation from the browser declining to report it.                                                       |
-| A tab's Space mid-move | `unknown: temporarily-unavailable`. Zen moves the attribute and the DOM position separately.                                                         |
+| Field                  | Status                                                                                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `mediaState`           | Only ever `playing`. Sound state cannot separate "no media" from "paused", and the invariant that matters is not interrupting a tab that is playing.   |
+| `browsingContextId`    | `unsupported` in the browser-discovery model. Page snapshots use separate opaque document and frame references rather than exposing browser internals. |
+| `url` on a lazy tab    | `unknown: not-loaded`, which is a different situation from the browser declining to report it.                                                         |
+| A tab's Space mid-move | `unknown: temporarily-unavailable`. Zen moves the attribute and the DOM position separately.                                                           |
 
 Private windows are dropped under the default `hidden` policy, and so are
 windows whose private state is merely unknown. "Might be private" is treated as
@@ -179,25 +179,45 @@ application, session replacement, and the host's connect-and-reconcile loop.
 Everything else is covered by `npm run spike:transport`, which runs
 `test/integration/transport.proof.test.ts` headed against a real Zen on a
 throwaway profile. Measured on Zen 1.21.9b / Gecko 153.0 / macOS 27.0 arm64. The
-latest expanded proof, including dedicated-actor inspection and background
-reload, passed 10/10 in 23.44 seconds; the transport had also passed four
-earlier headed runs before that surface was added:
+latest expanded proof passed 12/12 three consecutive times in approximately 29
+seconds per run; the transport had also passed earlier headed runs before the
+semantic surface was added:
 
 | Claim                                                        | Evidence                                                                                                                             |
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Zen loads an MV3 add-on that also declares `experiment_apis` | All nine capabilities detected. DEV-261 had only proved the two halves separately.                                                   |
+| Zen loads an MV3 add-on that also declares `experiment_apis` | All required and page-interaction capabilities detected. DEV-261 had only proved the two halves separately.                          |
 | Tabs in a non-visible Space are enumerated                   | Tabs seen in both Spaces at once — the failure that disqualified BiDi                                                                |
 | A background tab opens in a requested Space                  | Routed tab present, in the requested Space, not selected                                                                             |
 | **Identity survives a Space change**                         | The same identifier before and after `moveTab` moved it between Spaces, and every identifier from the first snapshot still resolved  |
 | The selected tab never changes                               | Unchanged across open, route, move, navigate, and close                                                                              |
-| Focus is never taken                                         | Frontmost macOS application unchanged across the whole run                                                                           |
+| Focus is never taken                                         | Zen never appeared in 100ms frontmost-application samples; browser focused-window state was unchanged                                |
 | A playing tab is not interrupted                             | Playback position advanced 11.19s → 16.71s across the agent's open/navigate/close cycle, and never rewound                           |
 | Privileged schemes are refused                               | `javascript:`, `file:` and `data:` all refused                                                                                       |
 | A non-visible page can be inspected without activation       | Dedicated packaged actor returned bounded visible text, title, URL, and load state; hidden text was excluded and selection unchanged |
+| Semantic page interaction remains in the background          | Snapshot/query/input/history passed for top-level, same-origin, cross-origin, and open-shadow-root content                           |
+| Stale targets are never retargeted                           | Replaced element and replaced document references returned explicit stale errors                                                     |
+
+## Page interaction
+
+The dedicated actor now also has a capability-gated semantic snapshot and DOM
+interaction contract. It aggregates explicit frame actors, returns opaque
+document, snapshot, frame, and element references, and rejects stale targets
+instead of retrying against replacement content. Mutations require a
+client-owned tab lease in the shared daemon.
+
+The input path is DOM-only. It does not activate a browsing context, select a
+tab, focus Zen, switch a Space, or synthesize native OS input. That boundary is
+intentional: a site that requires trusted user input is unsupported.
+
+This implementation is included in the proven table after three consecutive
+headed runs on the exact supported build. See
+[background page interaction](page-interaction.md) for the contract, bounds,
+concurrency rules, and proof status, and
+[ADR 0005](adr/0005-background-page-interaction.md) for the accepted decision.
 
 Focus is checked two ways, because the model's own `focused` field only compares
-Zen windows to each other: the run also asks macOS which application is
-frontmost before and after.
+Zen windows to each other: the run also samples macOS's frontmost application
+every 100ms and fails if Zen appears.
 
 Playback is measured from the page's own reported `currentTime`, not the tab's
 `soundPlaying` flag. That flag turned out to depend on whether the Zen window

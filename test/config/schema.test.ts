@@ -12,6 +12,11 @@ function configFixture(): ZenAgentConfig {
   return parseConfig({
     version: CONFIG_SCHEMA_VERSION,
     profile: "profile-daily",
+    profileMatch: "exact",
+    privateWindows: "hidden",
+    downloads: { directory: "~/Downloads" },
+    backgroundLaunch: { policy: "disabled" },
+    speech: { installedLocales: ["en-US"] },
     spaces: {
       personal: "space-personal",
       work: "space-work",
@@ -44,8 +49,13 @@ function configFixture(): ZenAgentConfig {
 describe("configuration schema", () => {
   it("parses a versioned config with explicit profile and stable Space IDs", () => {
     expect(configFixture()).toEqual({
-      version: 1,
+      version: 2,
       profile: "profile-daily",
+      profileMatch: "exact",
+      privateWindows: "hidden",
+      downloads: { directory: "~/Downloads" },
+      backgroundLaunch: { policy: "disabled" },
+      speech: { installedLocales: ["en-US"] },
       spaces: {
         personal: "space-personal",
         work: "space-work",
@@ -71,6 +81,59 @@ describe("configuration schema", () => {
         safeDefault: "research",
       },
     });
+  });
+
+  it("migrates schema version 1 with conservative policy defaults", () => {
+    expect(
+      parseConfig({
+        version: 1,
+        profile: "daily",
+        spaces: { personal: "space-personal", aliases: {} },
+        routing: { rules: [] },
+      }),
+    ).toEqual({
+      version: 2,
+      profile: "daily",
+      profileMatch: "exact",
+      privateWindows: "hidden",
+      downloads: { directory: "~/Downloads" },
+      backgroundLaunch: { policy: "disabled" },
+      speech: { installedLocales: [] },
+      spaces: { personal: "space-personal", aliases: {} },
+      routing: { rules: [] },
+    });
+  });
+
+  it("strictly validates version 2 policy and speech fields", () => {
+    expect(() =>
+      parseConfig({
+        version: 2,
+        profile: "daily",
+        profileMatch: "prefix",
+        privateWindows: "include",
+        downloads: {},
+        backgroundLaunch: { policy: "enabled" },
+        speech: { installedLocales: ["en-us", "en-US", "en-US"] },
+        spaces: { personal: "space-personal", aliases: {} },
+        routing: { rules: [] },
+      }),
+    ).toThrowError(/profileMatch[\s\S]*privateWindows[\s\S]*downloads/);
+  });
+
+  it("accepts only the existing explicit private-window opt-in", () => {
+    expect(
+      parseConfig({
+        version: 2,
+        profile: "daily",
+        profileMatch: "exact",
+        privateWindows: "explicit",
+        downloads: { directory: "~/Downloads" },
+        backgroundLaunch: { policy: "disabled" },
+        speech: { installedLocales: [] },
+        spaces: { personal: "space-personal", aliases: {} },
+        routing: { rules: [] },
+      }).privateWindows,
+    ).toBe("explicit");
   });
 
   it("reports actionable paths for schema and reference errors", () => {

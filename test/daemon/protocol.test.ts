@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DAEMON_PROTOCOL_RECOVERY,
   DAEMON_PROTOCOL_VERSION,
   daemonResponse,
   DaemonMessageDecoder,
@@ -24,15 +25,32 @@ describe("daemon protocol", () => {
   });
 
   it("refuses protocol mismatch and unknown methods clearly", () => {
-    expect(() =>
+    let mismatch: unknown;
+    try {
       parseDaemonRequest({
         protocolVersion: 99,
         type: "request",
         id: "request-1",
         clientId: "client-1",
         method: "health",
-      }),
-    ).toThrow(/protocol version/);
+      });
+    } catch (error) {
+      mismatch = error;
+    }
+
+    expect(mismatch).toBeInstanceOf(DaemonProtocolError);
+    expect(mismatch).toMatchObject({
+      code: "protocol-version-mismatch",
+      data: {
+        reason: "protocol-version-mismatch",
+        retryable: false,
+        performed: false,
+        resource: "daemon-protocol",
+        recovery: DAEMON_PROTOCOL_RECOVERY,
+        expectedProtocolVersion: DAEMON_PROTOCOL_VERSION,
+        receivedProtocolVersion: 99,
+      },
+    });
 
     expect(() =>
       parseDaemonRequest({
@@ -43,6 +61,23 @@ describe("daemon protocol", () => {
         method: "tabs.activate",
       }),
     ).toThrow(/Unknown daemon method/);
+  });
+
+  it.each([
+    "tabs.lease.acquire",
+    "tabs.lease.renew",
+    "tabs.lease.release",
+    "tabs.cleanup",
+  ] as const)("accepts the %s lease method", (method) => {
+    expect(
+      parseDaemonRequest({
+        protocolVersion: DAEMON_PROTOCOL_VERSION,
+        type: "request",
+        id: "request-1",
+        clientId: "client-1",
+        method,
+      }),
+    ).toMatchObject({ method });
   });
 
   it("enforces the declared and encoded message size", () => {

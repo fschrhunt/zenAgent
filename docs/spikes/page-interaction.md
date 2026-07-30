@@ -1,7 +1,7 @@
 # Background page interaction: implementation direction
 
-- Status: Dedicated Zen Agent JSWindowActor accepted for the first bounded,
-  read-only inspection slice
+- Status: Dedicated Zen Agent JSWindowActor accepted for bounded semantic
+  inspection and named DOM interaction
 - Date: 2026-07-29
 - Tested browser source: Zen 1.21.9b / Gecko 153.0
 
@@ -81,9 +81,69 @@ operation requiring an explicit stable tab ID. Discarded, crashed, non-HTTP(S),
 unavailable, and unproven-browser cases fail closed. Page content is returned
 only to the requesting client and is still excluded from default logs.
 
-This proves the packaging and background IPC direction. It does **not** prove
-semantic snapshots, frames, element identity, trusted input, screenshots, or
-arbitrary evaluation; those remain unexposed.
+This proved the packaging and background IPC direction. The later full proofs
+below cover semantic snapshots, frames, element identity, DOM-only input,
+screenshots, explicit file assignment, bounded resources, and media inspection.
+Trusted native input and arbitrary evaluation remain unexposed.
+
+## Headed result: semantic interaction succeeds
+
+On 2026-07-29 the expanded proof passed 12/12 three consecutive times against
+Zen 1.21.9b / Gecko 153.0 / macOS 27 arm64. Every run used a new throwaway
+profile, local HTTP fixtures, and temporary extension and native-host files.
+
+The scenario captured and queried a bounded semantic snapshot in a non-visible
+Space, then exercised click, fill, type, press, select, check, uncheck, form
+submission, back, and forward. It addressed top-level content, a same-origin
+frame, a cross-origin frame, and an open shadow root. Replacing a referenced
+element returned `stale-element`; navigating the tab made the prior document
+return `stale-document`.
+
+The selected tab and visible Space stayed unchanged. Browser focused-window
+state stayed unchanged, Zen never appeared in 100ms frontmost-application
+samples, and selected-tab audio continued advancing without rewinding.
+
+## Headed result: background-only workflow capabilities succeed
+
+On 2026-07-29 the expanded 30-test integration suite passed three consecutive
+times against Zen 1.21.9b / Gecko 153.0 / macOS 27 arm64. Each run used a new
+throwaway profile and asserted the frontmost application, Zen focused-window
+state, selected tab, visible Space, cursor coordinates, tab inventory, and
+selected-tab playback before and after the scenario.
+
+The accepted additions are bounded current-viewport and explicit-element PNG
+capture, geometry and closed-shadow reporting, explicit picker-free file-input
+assignment, bounded same-origin resource retrieval, media metadata and caption
+extraction, and bounded media-resource retrieval without changing playback.
+Static `target=_blank` links report a safe background-routing hint; direct
+clicks on those links, download links, and scripted popup controls remain
+refused.
+
+The fixture also contains static controls for JavaScript dialogs, notification,
+geolocation, microphone, clipboard, WebAuthn, payment, fullscreen, pointer-lock,
+and native-file-picker requests. The actor refuses each inline handler before
+dispatch. A privileged read-only observer samples open browser-chrome panels,
+the Firefox download panel, and browser-window count every 100 ms, while a
+read-only WindowServer observer records any newly appearing Zen- or
+notification-owned surface. The expanded daemon portion writes a bounded
+resource into a throwaway Downloads directory with collision handling,
+transcribes captions, and proves same-client temporary cleanup while retaining
+changed, untracked, and other-client tabs. If the `en-US` speech asset is
+already installed, it also transcribes a locally rendered prerecorded fixture
+through the real bundled helper; it never installs an asset during the run.
+
+The final frozen runtime passed those three consecutive headed runs. The
+background-only workflow scenario completed all 19 of its assertions in each
+run, including real on-device `en-US` transcription on the proven machine.
+
+Gecko permits path-backed `File` creation only in the parent process. The proof
+therefore creates opaque `File` objects in the privileged parent and transfers
+those objects to the explicit content actor for `mozSetFileArray`. It never
+opens a native picker, sends native input, focuses Zen, or discloses a path in
+the result.
+
+Tab-scoped dialogs remain unadvertised because no non-blocking background path
+has passed this same gate.
 
 ## Candidate architecture
 
@@ -110,31 +170,54 @@ JSWindowActor child in content process
 HTTP(S) document
 ```
 
-## Planned safe surface
+## Accepted safe surface
 
-The first headed spike implemented only URL, title, load state, and bounded
-visible text inspection. The next iterations may add:
+The accepted MCP surface includes:
 
 - A semantic snapshot containing roles, accessible names, states, and opaque
   short-lived element references, not full HTML.
-- Lookup by role/name, label, text, and explicit selector where needed.
+- Lookup by role/name, label, text, placeholder, element reference, and explicit
+  CSS selector where needed.
 - Click, fill, type, press, select, check, and uncheck.
-- Wait for load state, URL, text, or element using daemon/parent-side timers.
+- Wait for load state, URL, text, element, or document change using daemon-side
+  timers and MCP-to-daemon cancellation.
 - Back, forward, reload, and explicit HTTP(S) navigation.
 
 Every operation is scoped to a stable tab ID, frame ID, snapshot generation, and
 deadline.
 
+## Selection-takeover gate
+
+The automated non-interference suite cannot select the agent target as a
+positive control: doing so would itself violate the suite's invariant and could
+focus Zen or switch the visible Space. Transport observation and daemon lease
+revocation therefore have portable contract coverage, but selection takeover
+requires a separate, explicitly manual throwaway-profile gate:
+
+1. Start the isolated fixture with one background target leased by a test client
+   and record the selected tab, Space, focus, cursor, and mutation count.
+2. A human deliberately selects that target once. No agent, extension, script,
+   accessibility API, or native event generator performs the selection.
+3. Verify the daemon revoked the lease and page references, returned a
+   structured terminal `partial` or `blocked` result, and performed no further
+   mutation.
+4. Verify Zen Agent did not select away, clone the tab, move the cursor, change
+   Space, or regain focus after the human action.
+
+Run this three consecutive times on the exact Zen/Gecko/macOS tuple. Until that
+manual gate is recorded, selection takeover must not be cited as a headed-proven
+capability; the safe fallback remains immediate refusal of mutation whenever the
+live target is already selected.
+
 ## Deferred from the first surface
 
 - Arbitrary JavaScript evaluation. Named operations cover the product use case
   with a smaller privileged surface.
-- Screenshots over this transport. BiDi proved a non-selected capture, but the
-  chosen extension transport must independently pass a headed compositor test.
-- Uploads and downloads until path boundaries and status semantics are defined.
 - Dialog handling until a non-blocking actor path is proven.
 
-Deferral means “not exposed,” not an unsafe fallback.
+The previously deferred screenshot, upload, and bounded resource-download
+surfaces are accepted by the expanded proof above. Remaining deferral means “not
+exposed,” not an unsafe fallback.
 
 ## Risks to prove
 
@@ -142,16 +225,13 @@ Deferral means “not exposed,” not an unsafe fallback.
       packaged resources on release Zen.
 - [x] Actor queries work for a loaded tab in a non-visible Space without
       selecting it.
-- DOM activation or synthesized input does not redirect events to the selected
-  tab.
-- Cross-origin frames can be enumerated and addressed explicitly.
-- Shadow DOM traversal preserves encapsulation and produces stable-enough
-  snapshot-local references.
-- A navigation between resolution and operation returns stale-element or
-  stale-frame, never an operation against the replacement document.
-- Background timer throttling does not break waits. Polling must be scheduled by
-  the daemon or parent process rather than relying on page timers.
-- Result ceilings and cancellation work for large or hostile documents.
+- [x] DOM interaction does not redirect events to the selected tab.
+- [x] Same-origin and cross-origin frames can be enumerated and addressed
+      explicitly.
+- [x] Open shadow DOM traversal produces snapshot-local references.
+- [x] Navigation and DOM replacement return explicit stale errors.
+- [x] Waits use daemon timers rather than throttled page timers.
+- [x] Result ceilings and cancellation are covered by portable tests.
 
 ## Stop condition
 

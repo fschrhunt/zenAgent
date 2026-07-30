@@ -13,6 +13,7 @@ import { configPath, loadOptionalConfig } from "../config/path.js";
 import type { ZenAgentConfig } from "../config/schema.js";
 import { createDaemonLogger, type DaemonLogLevel } from "../daemon/logger.js";
 import { daemonPaths, type DaemonPaths } from "../daemon/paths.js";
+import { DaemonProtocolError } from "../daemon/protocol.js";
 import { DaemonSocketServer } from "../daemon/server.js";
 import { DaemonService, type DaemonTransport } from "../daemon/service.js";
 import {
@@ -58,6 +59,27 @@ export async function startNativeDaemonHost(
       );
     },
   });
+  const loadConfig =
+    options.config === undefined
+      ? () => loadOptionalConfig(options.configFile ?? configPath())
+      : () => Promise.resolve(options.config);
+  const initialConfig = await loadConfig();
+  const privateWindowPolicy =
+    options.privateWindowPolicy ?? initialConfig?.privateWindows;
+
+  if (privateWindowPolicy === "explicit") {
+    throw new DaemonProtocolError(
+      "unsupported-capability",
+      "Private-window access has not passed Zen Agent's separate headed safety proof.",
+      {
+        reason: "private-window-proof-required",
+        resource: "private-window",
+        retryable: false,
+        recovery: "set-private-windows-hidden",
+      },
+    );
+  }
+
   const transport =
     options.transport ??
     (() => {
@@ -71,17 +93,10 @@ export async function startNativeDaemonHost(
         ...(options.requestTimeoutMs === undefined
           ? {}
           : { requestTimeoutMs: options.requestTimeoutMs }),
-        ...(options.privateWindowPolicy === undefined
-          ? {}
-          : { privateWindowPolicy: options.privateWindowPolicy }),
+        ...(privateWindowPolicy === undefined ? {} : { privateWindowPolicy }),
         ...(options.now === undefined ? {} : { now: options.now }),
       });
     })();
-  const loadConfig =
-    options.config === undefined
-      ? () => loadOptionalConfig(options.configFile ?? configPath())
-      : () => Promise.resolve(options.config);
-  const initialConfig = await loadConfig();
 
   let transportClaimed = false;
   let server: DaemonSocketServer | undefined;

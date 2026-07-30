@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -54,6 +54,71 @@ try {
   for (const executable of ["zen-agent", "zen-agent-host", "zen-agent-mcp"]) {
     if (!existsSync(join(installPrefix, "bin", executable))) {
       throw new Error(`Bundled release is missing ${executable}.`);
+    }
+  }
+
+  const cliPath = join(installPrefix, "bin", "zen-agent");
+  const cliHelp = execFileSync(cliPath, ["--help"], {
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+  const cliVersion = execFileSync(cliPath, ["version"], {
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+  if (
+    !cliHelp.includes(`zen-agent ${version}`) ||
+    cliVersion.trim() !== version
+  ) {
+    throw new Error("Installed CLI smoke test returned unexpected output.");
+  }
+
+  // MCP requires the browser-provided daemon. With an isolated config path and
+  // no daemon, it must fail promptly and sanitise the startup diagnostic rather
+  // than hanging, emitting a protocol frame, or leaking a filesystem path.
+  const mcpConfigPath = join(temporaryDirectory, "missing-config.json");
+  const mcpSmoke = spawnSync(join(installPrefix, "bin", "zen-agent-mcp"), [], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ZEN_AGENT_CONFIG: mcpConfigPath,
+    },
+    timeout: 5_000,
+  });
+  if (
+    mcpSmoke.status !== 1 ||
+    mcpSmoke.stdout !== "" ||
+    !mcpSmoke.stderr.startsWith("zen-agent-mcp failed (") ||
+    mcpSmoke.stderr.includes(temporaryDirectory)
+  ) {
+    throw new Error(
+      "Installed MCP startup did not fail safely without a daemon.",
+    );
+  }
+
+  if (process.platform === "darwin") {
+    const speechHelper = join(
+      installPrefix,
+      "lib",
+      "node_modules",
+      "zen-agent",
+      "dist",
+      "native",
+      "zen-agent-speech",
+    );
+    if (!existsSync(speechHelper)) {
+      throw new Error("Bundled macOS release is missing zen-agent-speech.");
+    }
+    const contract = JSON.parse(
+      execFileSync(speechHelper, ["contract"], { encoding: "utf8" }),
+    );
+    if (
+      contract.ok !== true ||
+      contract.contractVersion !== 1 ||
+      contract.result?.onDeviceOnly !== true ||
+      contract.result?.runtimeDownloads !== false
+    ) {
+      throw new Error("Bundled speech helper contract is unsafe or invalid.");
     }
   }
 

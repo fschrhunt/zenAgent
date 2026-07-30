@@ -68,6 +68,69 @@ var zenProbe = class extends ExtensionAPI {
     IOUtils.writeJSON(path, result);
   }
 
+  writeUiEvidence(result) {
+    const path = Services.prefs.getStringPref(
+      "zenagent.probe.ui-output",
+      "/tmp/zen-agent-probe-ui.json",
+    );
+    IOUtils.writeJSON(path, result);
+  }
+
+  /**
+   * Read-only browser-chrome observer for the headed acceptance fixture.
+   *
+   * It never closes, focuses, or otherwise touches chrome UI. The result is a
+   * privacy-safe set of booleans: no page title, URL, notification body, file
+   * path, or form value is recorded.
+   */
+  observeForegroundUi(win) {
+    const baselineWindows = Services.wm.getEnumerator("navigator:browser");
+    let baselineWindowCount = 0;
+    while (baselineWindows.hasMoreElements()) {
+      baselineWindows.getNext();
+      baselineWindowCount += 1;
+    }
+
+    const evidence = {
+      samples: 0,
+      sawOpenChromePopup: false,
+      sawDownloadPanel: false,
+      sawAdditionalBrowserWindow: false,
+    };
+    let writing = false;
+
+    const sample = async () => {
+      evidence.samples += 1;
+      const openChromeUi = win.document.querySelector(
+        'panel[open="true"], panel[state="open"], menupopup[open="true"], dialog[open="true"]',
+      );
+      evidence.sawOpenChromePopup ||= openChromeUi !== null;
+      evidence.sawDownloadPanel ||= win.DownloadsPanel?.isPanelShowing === true;
+
+      const windows = Services.wm.getEnumerator("navigator:browser");
+      let windowCount = 0;
+      while (windows.hasMoreElements()) {
+        windows.getNext();
+        windowCount += 1;
+      }
+      evidence.sawAdditionalBrowserWindow ||= windowCount > baselineWindowCount;
+
+      if (!writing) {
+        writing = true;
+        try {
+          await this.writeUiEvidence(evidence);
+        } finally {
+          writing = false;
+        }
+      }
+    };
+
+    void sample();
+    win.setInterval(() => {
+      void sample();
+    }, 100);
+  }
+
   /** A stable, privacy-safe description of a tab. */
   describe(tab) {
     return {
@@ -161,5 +224,6 @@ var zenProbe = class extends ExtensionAPI {
     };
     result.ok = true;
     this.write(result);
+    this.observeForegroundUi(win);
   }
 };

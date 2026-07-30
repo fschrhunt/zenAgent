@@ -10,7 +10,7 @@ zen-agent
 Use the arrow keys to move, Enter to select, and Escape to close a prompt. The
 wizard can install or refresh the Native Messaging host, show the remaining Zen
 profile requirements, check the daemon connection, map Personal and Work Spaces,
-and remove the host safely.
+remove the host safely, and explicitly install on-device speech models.
 
 Agents and scripts retain explicit commands with stable exit codes and JSON
 output. They do not have to automate the menu. The utility does not expose tab
@@ -41,8 +41,13 @@ An installed package exposes the same command as `zen-agent`.
 | ----------------------- | ------------------------------------------------------------------------- |
 | `setup`                 | Open the interactive setup wizard explicitly                              |
 | `status`                | Report sanitized daemon, profile, session, and registry-count state       |
+| `doctor`                | Report sanitized config, host, daemon, policy, and speech readiness       |
 | `spaces list`           | List discovered Spaces and opaque stable IDs for configuration            |
 | `config map`            | Validate discovered IDs and atomically update Space mappings              |
+| `config migrate`        | Atomically migrate a version 1 configuration to strict version 2          |
+| `speech locales`        | List supported and installed Apple on-device speech locales               |
+| `speech install`        | Explicitly download and install one SpeechTranscriber model asset         |
+| `speech transcribe`     | Transcribe one prerecorded local audio file entirely on device            |
 | `native-host install`   | Install the per-user macOS launcher and Native Messaging manifest         |
 | `native-host uninstall` | Remove only a launcher and manifest recognisably created by the installer |
 | `help`                  | Show the setup utility's command surface                                  |
@@ -87,7 +92,35 @@ Use the sanitized status command for diagnostics:
 ```sh
 zen-agent status
 zen-agent status --json
+zen-agent doctor --json
 ```
+
+`doctor` omits paths and browsing content. It reports the configuration, Native
+Messaging host, daemon, exact-profile setting, Downloads policy, private-window
+policy, background-launch gate, and speech helper. Extension version is
+currently labeled `not-reported` rather than guessed.
+
+## On-device prerecorded speech
+
+On macOS 26 or newer, inspect locales and explicitly install an Apple model:
+
+```sh
+zen-agent speech locales
+zen-agent speech install --locale en-US
+```
+
+Only `speech install` may call `AssetInventory` to download a model. Runtime
+transcription requires that model to be installed:
+
+```sh
+zen-agent speech transcribe \
+  --locale en-US \
+  --input /absolute/path/to/recording.m4a
+```
+
+The Swift helper uses `SpeechAnalyzer` and `SpeechTranscriber` for prerecorded
+local audio. It does not use the microphone, fall back to a server, download a
+model, open UI, or emit notifications during transcription.
 
 Space IDs are scoped to one browser session. List them again after a browser or
 native-host restart before changing configuration. `config map` verifies every

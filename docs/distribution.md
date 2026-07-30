@@ -18,8 +18,15 @@ tarball containing:
 - `zen-agent`, the interactive setup wizard and agent command backplane;
 - `zen-agent-host`, the Native Messaging host;
 - `zen-agent-mcp`, the stdio MCP server;
+- an internal macOS 26+ Swift helper for on-device prerecorded transcription;
 - the privileged extension source; and
 - every locked production Node.js dependency.
+
+The macOS build compiles `native/speech-helper/main.swift` with Apple's Speech
+framework and places the helper under `dist/native`. Portable Linux CI packages
+the Swift source but skips compilation because Apple frameworks are not
+available. Release verification executes the helper contract and requires
+`onDeviceOnly: true` and `runtimeDownloads: false`.
 
 The tarball uses npm's documented bundled-dependency format as an internal build
 artifact. It is attached to GitHub Releases rather than uploaded to the npm
@@ -56,6 +63,10 @@ After `brew upgrade`, run `zen-agent` and choose **Repair native host**, or use
 `zen-agent native-host install` from automation. Either path refreshes the
 pinned Node and host-module paths only when both existing installation files
 validate as Zen Agent-owned.
+
+The package, native host, and profile extension must be upgraded or rolled back
+together. The complete procedure, including configuration migration and
+protocol-mismatch recovery, is in [Upgrade and rollback](upgrading.md).
 
 ## Release blockers
 

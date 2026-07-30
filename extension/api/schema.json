@@ -84,6 +84,278 @@
         ]
       },
       {
+        "name": "snapshotPage",
+        "type": "function",
+        "async": true,
+        "description": "Capture a bounded semantic snapshot from an explicit loaded HTTP(S) tab without selecting it.",
+        "parameters": [
+          { "name": "tabId", "type": "string" },
+          {
+            "name": "options",
+            "type": "object",
+            "optional": true,
+            "properties": {
+              "maxNodes": {
+                "type": "integer",
+                "optional": true,
+                "minimum": 1,
+                "maximum": 5000
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "queryPage",
+        "type": "function",
+        "async": true,
+        "description": "Query one frame of a live semantic page snapshot.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          },
+          {
+            "name": "options",
+            "type": "object",
+            "additionalProperties": true
+          }
+        ]
+      },
+      {
+        "name": "clickPage",
+        "type": "function",
+        "async": true,
+        "description": "Click an explicit live element reference with a targeted DOM operation.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          }
+        ]
+      },
+      {
+        "name": "fillPage",
+        "type": "function",
+        "async": true,
+        "description": "Replace the value of an explicit editable element without focusing it.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          },
+          { "name": "value", "type": "string" }
+        ]
+      },
+      {
+        "name": "typePage",
+        "type": "function",
+        "async": true,
+        "description": "Append text to an explicit editable element without focusing it.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          },
+          { "name": "value", "type": "string" }
+        ]
+      },
+      {
+        "name": "pressPage",
+        "type": "function",
+        "async": true,
+        "description": "Dispatch a bounded key operation to an explicit element without native input or focus.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          },
+          {
+            "name": "options",
+            "type": "object",
+            "additionalProperties": true
+          }
+        ]
+      },
+      {
+        "name": "selectPage",
+        "type": "function",
+        "async": true,
+        "description": "Select explicit values in an explicit select element.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          },
+          {
+            "name": "values",
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        ]
+      },
+      {
+        "name": "checkPage",
+        "type": "function",
+        "async": true,
+        "description": "Set an explicit checkbox or radio element to checked.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          }
+        ]
+      },
+      {
+        "name": "uncheckPage",
+        "type": "function",
+        "async": true,
+        "description": "Set an explicit checkbox element to unchecked.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          }
+        ]
+      },
+      {
+        "name": "submitPage",
+        "type": "function",
+        "async": true,
+        "description": "Submit the form associated with an explicit element reference.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          }
+        ]
+      },
+      {
+        "name": "uploadPage",
+        "type": "function",
+        "async": true,
+        "description": "Assign daemon-validated staged paths to an explicit file input without opening a picker.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          },
+          {
+            "name": "paths",
+            "type": "array",
+            "maxItems": 32,
+            "items": { "type": "string" }
+          }
+        ]
+      },
+      {
+        "name": "listPageMedia",
+        "type": "function",
+        "async": true,
+        "description": "List bounded media metadata and accessible caption cues in one explicit frame.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          }
+        ]
+      },
+      {
+        "name": "fetchPageMedia",
+        "type": "function",
+        "async": true,
+        "description": "Fetch bounded same-origin non-DRM bytes for an explicit media element.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          },
+          {
+            "name": "options",
+            "type": "object",
+            "optional": true,
+            "additionalProperties": true
+          }
+        ]
+      },
+      {
+        "name": "fetchPageResource",
+        "type": "function",
+        "async": true,
+        "description": "Fetch a bounded same-origin HTTP(S) resource with the page's credentials and no redirects.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          },
+          { "name": "url", "type": "string" },
+          {
+            "name": "options",
+            "type": "object",
+            "optional": true,
+            "additionalProperties": true
+          }
+        ]
+      },
+      {
+        "name": "screenshotPage",
+        "type": "function",
+        "async": true,
+        "description": "Capture an explicit frame viewport or element via parent-process drawSnapshot without activation.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          },
+          {
+            "name": "options",
+            "type": "object",
+            "optional": true,
+            "additionalProperties": true
+          }
+        ]
+      },
+      {
+        "name": "backPage",
+        "type": "function",
+        "async": true,
+        "description": "Navigate an explicit tab back after validating its document generation.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          }
+        ]
+      },
+      {
+        "name": "forwardPage",
+        "type": "function",
+        "async": true,
+        "description": "Navigate an explicit tab forward after validating its document generation.",
+        "parameters": [
+          {
+            "name": "target",
+            "type": "object",
+            "additionalProperties": true
+          }
+        ]
+      },
+      {
         "name": "closeTab",
         "type": "function",
         "async": true,

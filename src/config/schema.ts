@@ -1,6 +1,11 @@
-export const CONFIG_SCHEMA_VERSION = 1 as const;
+import type { PrivateWindowPolicy } from "../browser/model.js";
 
-export type ConfigSchemaVersion = typeof CONFIG_SCHEMA_VERSION;
+export const CONFIG_SCHEMA_VERSION = 2 as const;
+export const LEGACY_CONFIG_SCHEMA_VERSION = 1 as const;
+export const DEFAULT_DOWNLOAD_DIRECTORY = "~/Downloads";
+
+export type ConfigSchemaVersion =
+  typeof LEGACY_CONFIG_SCHEMA_VERSION | typeof CONFIG_SCHEMA_VERSION;
 
 export interface SpaceMappings {
   readonly personal?: string;
@@ -31,11 +36,37 @@ export interface RoutingConfig {
   readonly safeDefault?: string;
 }
 
+export interface DownloadConfig {
+  readonly directory: string;
+}
+
+export interface BackgroundLaunchConfig {
+  /**
+   * Background launch is deliberately configuration-gated until a headed
+   * safety proof accepts it.
+   */
+  readonly policy: "disabled";
+}
+
+export interface SpeechConfig {
+  /** BCP-47 locales whose on-device model assets setup installed explicitly. */
+  readonly installedLocales: readonly string[];
+}
+
 export interface ZenAgentConfig {
   readonly version: ConfigSchemaVersion;
   readonly profile: string;
   readonly spaces: SpaceMappings;
   readonly routing: RoutingConfig;
+  /**
+   * Version 1 values remain representable for source compatibility. Parsing or
+   * writing configuration always migrates them to version 2.
+   */
+  readonly profileMatch?: "exact";
+  readonly privateWindows?: PrivateWindowPolicy;
+  readonly downloads?: DownloadConfig;
+  readonly backgroundLaunch?: BackgroundLaunchConfig;
+  readonly speech?: SpeechConfig;
 }
 
 export interface ConfigValidationIssue {
@@ -57,9 +88,20 @@ export class ConfigValidationError extends Error {
   }
 }
 
-const ROOT_KEYS = new Set(["version", "profile", "spaces", "routing"]);
+const LEGACY_ROOT_KEYS = new Set(["version", "profile", "spaces", "routing"]);
+const ROOT_KEYS = new Set([
+  ...LEGACY_ROOT_KEYS,
+  "profileMatch",
+  "privateWindows",
+  "downloads",
+  "backgroundLaunch",
+  "speech",
+]);
 const SPACE_KEYS = new Set(["personal", "work", "aliases"]);
 const ROUTING_KEYS = new Set(["rules", "safeDefault"]);
+const DOWNLOAD_KEYS = new Set(["directory"]);
+const BACKGROUND_LAUNCH_KEYS = new Set(["policy"]);
+const SPEECH_KEYS = new Set(["installedLocales"]);
 const DOMAIN_RULE_KEYS = new Set([
   "id",
   "kind",
@@ -446,6 +488,146 @@ function parseRouting(
   };
 }
 
+function parseDownloads(
+  value: unknown,
+  issues: ConfigValidationIssue[],
+): DownloadConfig {
+  if (!isRecord(value)) {
+    issues.push({
+      path: "$.downloads",
+      message: "must be an object containing a download directory",
+    });
+    return { directory: DEFAULT_DOWNLOAD_DIRECTORY };
+  }
+
+  reportUnknownKeys(value, DOWNLOAD_KEYS, "$.downloads", issues);
+  return {
+    directory:
+      nonEmptyString(value.directory, "$.downloads.directory", issues) ??
+      DEFAULT_DOWNLOAD_DIRECTORY,
+  };
+}
+
+function parseBackgroundLaunch(
+  value: unknown,
+  issues: ConfigValidationIssue[],
+): BackgroundLaunchConfig {
+  if (!isRecord(value)) {
+    issues.push({
+      path: "$.backgroundLaunch",
+      message: "must be an object containing the launch policy",
+    });
+    return { policy: "disabled" };
+  }
+
+  reportUnknownKeys(
+    value,
+    BACKGROUND_LAUNCH_KEYS,
+    "$.backgroundLaunch",
+    issues,
+  );
+  if (value.policy !== "disabled") {
+    issues.push({
+      path: "$.backgroundLaunch.policy",
+      message:
+        "must be 'disabled' until background launch passes its headed safety proof",
+    });
+  }
+  return { policy: "disabled" };
+}
+
+function canonicalLocale(
+  value: unknown,
+  path: string,
+  issues: ConfigValidationIssue[],
+): string | undefined {
+  const locale = nonEmptyString(value, path, issues);
+  if (locale === undefined) {
+    return undefined;
+  }
+
+  try {
+    const [canonical] = Intl.getCanonicalLocales(locale);
+    if (canonical === undefined || canonical !== locale) {
+      issues.push({
+        path,
+        message: `must be a canonical BCP-47 locale${
+          canonical === undefined ? "" : ` such as '${canonical}'`
+        }`,
+      });
+      return undefined;
+    }
+  } catch {
+    issues.push({ path, message: "must be a valid BCP-47 locale" });
+    return undefined;
+  }
+
+  return locale;
+}
+
+function parseSpeech(
+  value: unknown,
+  issues: ConfigValidationIssue[],
+): SpeechConfig {
+  if (!isRecord(value)) {
+    issues.push({
+      path: "$.speech",
+      message: "must be an object containing installedLocales",
+    });
+    return { installedLocales: [] };
+  }
+
+  reportUnknownKeys(value, SPEECH_KEYS, "$.speech", issues);
+  if (!Array.isArray(value.installedLocales)) {
+    issues.push({
+      path: "$.speech.installedLocales",
+      message: "must be an array of canonical BCP-47 locales",
+    });
+    return { installedLocales: [] };
+  }
+
+  const installedLocales: string[] = [];
+  const seen = new Set<string>();
+  for (const [index, rawLocale] of value.installedLocales.entries()) {
+    const path = `$.speech.installedLocales[${String(index)}]`;
+    const locale = canonicalLocale(rawLocale, path, issues);
+    if (locale === undefined) {
+      continue;
+    }
+    if (seen.has(locale)) {
+      issues.push({ path, message: `duplicates locale '${locale}'` });
+      continue;
+    }
+    seen.add(locale);
+    installedLocales.push(locale);
+  }
+  return { installedLocales };
+}
+
+function currentConfig(
+  profile: string,
+  spaces: SpaceMappings,
+  routing: RoutingConfig,
+  settings: {
+    readonly privateWindows: PrivateWindowPolicy;
+    readonly downloads: DownloadConfig;
+    readonly backgroundLaunch: BackgroundLaunchConfig;
+    readonly speech: SpeechConfig;
+  },
+): ZenAgentConfig {
+  return {
+    version: CONFIG_SCHEMA_VERSION,
+    profile,
+    profileMatch: "exact",
+    privateWindows: settings.privateWindows,
+    downloads: settings.downloads,
+    backgroundLaunch: settings.backgroundLaunch,
+    speech: settings.speech,
+    spaces,
+    routing,
+  };
+}
+
 export function parseConfig(value: unknown): ZenAgentConfig {
   const issues: ConfigValidationIssue[] = [];
   if (!isRecord(value)) {
@@ -454,27 +636,57 @@ export function parseConfig(value: unknown): ZenAgentConfig {
     ]);
   }
 
-  reportUnknownKeys(value, ROOT_KEYS, "$", issues);
-  if (value.version !== CONFIG_SCHEMA_VERSION) {
+  const legacy = value.version === LEGACY_CONFIG_SCHEMA_VERSION;
+  reportUnknownKeys(value, legacy ? LEGACY_ROOT_KEYS : ROOT_KEYS, "$", issues);
+  if (!legacy && value.version !== CONFIG_SCHEMA_VERSION) {
     issues.push({
       path: "$.version",
-      message: `must equal supported schema version ${String(CONFIG_SCHEMA_VERSION)}`,
+      message: `must equal schema version ${String(LEGACY_CONFIG_SCHEMA_VERSION)} or ${String(CONFIG_SCHEMA_VERSION)}`,
     });
   }
   const profile = nonEmptyString(value.profile, "$.profile", issues);
   const spaces = parseSpaces(value.spaces, issues);
   const routing = parseRouting(value.routing, spaces, issues);
+  let privateWindows: PrivateWindowPolicy = "hidden";
+  let downloads: DownloadConfig = {
+    directory: DEFAULT_DOWNLOAD_DIRECTORY,
+  };
+  let backgroundLaunch: BackgroundLaunchConfig = { policy: "disabled" };
+  let speech: SpeechConfig = { installedLocales: [] };
+
+  if (!legacy) {
+    if (value.profileMatch !== "exact") {
+      issues.push({
+        path: "$.profileMatch",
+        message: "must be 'exact'",
+      });
+    }
+    if (
+      value.privateWindows !== "hidden" &&
+      value.privateWindows !== "explicit"
+    ) {
+      issues.push({
+        path: "$.privateWindows",
+        message: "must be either 'hidden' or 'explicit'",
+      });
+    } else {
+      privateWindows = value.privateWindows;
+    }
+    downloads = parseDownloads(value.downloads, issues);
+    backgroundLaunch = parseBackgroundLaunch(value.backgroundLaunch, issues);
+    speech = parseSpeech(value.speech, issues);
+  }
 
   if (issues.length > 0 || profile === undefined) {
     throw new ConfigValidationError(issues);
   }
 
-  return {
-    version: CONFIG_SCHEMA_VERSION,
-    profile,
-    spaces,
-    routing,
-  };
+  return currentConfig(profile, spaces, routing, {
+    privateWindows,
+    downloads,
+    backgroundLaunch,
+    speech,
+  });
 }
 
 export function parseConfigJson(json: string): ZenAgentConfig {

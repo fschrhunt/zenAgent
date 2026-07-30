@@ -431,37 +431,48 @@ Tracking: [DEV-265](https://linear.app/intuitum/issue/DEV-265)
 
 Tab management alone is not enough for agents to complete browser tasks.
 
-- [ ] Define a page snapshot format suitable for agents.
-- [ ] Prefer an accessibility/semantic snapshot over raw full-page HTML.
+- [x] Define a page snapshot format suitable for agents.
+- [x] Prefer an accessibility/semantic snapshot over raw full-page HTML.
 - [x] Scope every page operation to an explicit stable tab ID. The first exposed
       operation, `pages.inspect`, resolves only the caller's stable tab ID; no
       active-tab fallback exists.
-- [ ] Assign short-lived element references that are also scoped to tab and
+- [x] Assign short-lived element references that are also scoped to tab and
       snapshot generation.
-- [ ] Return a stale-element error after navigation or DOM replacement.
+- [x] Return a stale-element error after navigation or DOM replacement.
 - [x] Implement page URL, title, text, and load-state inspection. A dedicated
       packaged JSWindowActor passed the headed non-visible-Space proof with
       bounded output and traversal; see
       [the page interaction spike](../docs/spikes/page-interaction.md).
-- [ ] Implement semantic element lookup and query.
-- [ ] Implement click without activating the tab.
-- [ ] Implement fill and type without activating the tab.
-- [ ] Implement keyboard press without sending input to the user's active tab.
-- [ ] Implement select, check, uncheck, and form submission.
-- [ ] Implement wait for load state, URL, text, element, and bounded timeout.
-- [ ] Implement back, forward, reload, and explicit navigation.
-- [ ] Handle same-origin and cross-origin frames with explicit frame identity.
-- [ ] Handle dialogs without blocking the entire daemon.
-- [ ] Handle downloads with explicit destination policy and status reporting.
-- [ ] Handle file uploads only from explicit caller-provided paths.
-- [ ] Decide whether screenshots can be captured without tab selection; expose
-      them only if the invariant is proven.
-- [ ] Decide whether arbitrary JavaScript evaluation is necessary.
-- [ ] If evaluation is exposed, clearly mark it as privileged and prevent its
-      result or arguments from entering logs.
-- [ ] Add per-operation timeouts, cancellation, and useful error diagnostics.
+- [x] Implement semantic element lookup and query.
+- [x] Implement click without activating the tab.
+- [x] Implement fill and type without activating the tab.
+- [x] Implement keyboard press without sending input to the user's active tab.
+- [x] Implement select, check, uncheck, and form submission.
+- [x] Implement wait for load state, URL, text, element, and bounded timeout.
+- [x] Implement back, forward, reload, and explicit navigation.
+- [x] Handle same-origin and cross-origin frames with explicit frame identity.
+- [ ] Handle dialogs without blocking the entire daemon. The capability remains
+      absent: no tab-scoped path has yet passed the headed non-interference
+      gate, and foreground or window-modal handling is permanently unsupported.
+- [x] Handle downloads with explicit destination policy and status reporting.
+      Bounded same-origin HTTP(S) resources stream to collision-safe files in
+      the configured Downloads directory; Firefox download UI is never used.
+- [x] Handle file uploads only from explicit caller-provided paths. The daemon
+      rejects symlinks and non-regular files, stages bounded files without
+      logging paths, and assigns them without opening a picker.
+- [x] Decide whether screenshots can be captured without tab selection; expose
+      them only if the invariant is proven. Bounded viewport and explicit
+      element PNGs passed three consecutive headed non-interference runs.
+- [x] Decide whether arbitrary JavaScript evaluation is necessary. It is not
+      exposed; named operations cover the accepted use cases with a smaller
+      privileged surface.
+- [x] Keep evaluation unexposed. There is no privileged evaluation result or
+      argument surface to log.
+- [x] Add per-operation timeouts, cancellation, and useful error diagnostics.
 - [ ] Test dynamic applications, shadow DOM, iframes, redirects, dialogs,
-      downloads, stale elements, and background execution.
+      downloads, stale elements, and background execution. All listed cases
+      except dialogs now have portable or headed coverage; dialog capability
+      remains absent pending a safe actor design.
 
 ## 9. Expose the daemon through MCP
 
@@ -475,7 +486,7 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 - [x] Expose Space and tab listing.
 - [x] Expose tab resolution and background opening.
 - [x] Expose explicit-ID navigation, reload, and close operations.
-- [ ] Expose the proven page snapshot and interaction operations.
+- [x] Expose the proven page snapshot and interaction operations.
 - [x] Generate strict input and output schemas.
 - [x] Include side-effect and safety information in every tool description.
 - [x] Return structured ambiguity, stale-ID, unsupported-capability,
@@ -489,20 +500,25 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 
 ## 10. Multi-agent correctness
 
-- [ ] Define ownership and lease behavior for concurrent work on the same tab.
+- [x] Define ownership and lease behavior for concurrent work on the same tab.
 - [x] Decide whether reads can occur while another client mutates a tab. Safe
       registry/status reads bypass the FIFO mutation queue and are covered by a
       gated-mutation concurrency test.
 - [x] Prevent duplicate tab creation across simultaneous agents. Resolve/open
       operations serialize around fresh discovery, with a two-client race test.
-- [ ] Prevent one agent from navigating or closing a tab another agent has
+- [x] Prevent one agent from navigating or closing a tab another agent has
       leased unless explicitly forced.
 - [x] Include client and operation IDs in sanitized diagnostics.
-- [ ] Add optimistic version checks to tab and snapshot mutations.
+- [x] Add optimistic version checks to tab and snapshot mutations. Existing-tab
+      mutations accept an optional registry-sequence precondition that is
+      checked inside the per-tab queue immediately before dispatch. Element
+      mutations require the client's newest retained snapshot for the tab; older
+      snapshots remain read-only.
 - [x] Make safe retries idempotent. Retryable mutations require client-scoped
       idempotency keys with bounded retention.
-- [ ] Add load and race tests with multiple MCP clients. The daemon has a
-      two-client resolve race; sustained MCP load remains.
+- [x] Add load and race tests with multiple MCP clients. Portable tests cover a
+      two-client resolve race, bounded multi-client socket load across per-tab
+      queues, same-tab FIFO ordering, and cross-tab concurrency.
 
 ## 11. Security and privacy hardening
 
@@ -532,22 +548,33 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 - [x] Validate every URL and reject unsupported or dangerous schemes.
 - [x] Define behavior for `file:`, `data:`, `javascript:`, extension, and
       browser internal URLs.
-- [ ] Define download and upload path boundaries.
+- [x] Define download and upload path boundaries. Uploads accept explicit
+      caller-authorized absolute regular-file paths and reject symlinks,
+      directories, devices, excessive counts, and excessive sizes. Downloads use
+      the configured standard Downloads directory, collision-safe names, bounded
+      bytes, cancellation, and no overwrite.
 - [x] Audit production and development dependencies continuously. The security
       workflow and Dependabot remain enabled; the final production audit
       reported zero vulnerabilities.
-- [ ] Add secret scanning and an appropriate static-analysis path if the
-      repository's GitHub plan supports it.
+- [x] Add secret scanning and an appropriate static-analysis path if the
+      repository's GitHub plan supports it. The security workflow now runs
+      gitleaks and CodeQL for JavaScript/TypeScript; `actionlint` passed
+      locally. The first remote workflow run remains release evidence rather
+      than a local claim.
 - [x] Document that website-level destructive actions follow the calling agent's
       policy; Zen Agent itself does not add a redundant allow prompt. Recorded
       in the malicious-page boundary of the threat model.
 
 ## 12. Testing and safety verification
 
-- [ ] Set a coverage target for policy, resolver, daemon, setup CLI, and MCP
-      code.
+- [x] Set a coverage target for policy, resolver, daemon, setup CLI, and MCP
+      code. Per-area statement, branch, function, and line thresholds are
+      enforced by `npm run test:coverage`; the complete portable run passed with
+      358 tests on 2026-07-29.
 - [ ] Add fixture sites for forms, navigation, frames, dialogs, downloads, and
-      dynamic DOM replacement.
+      dynamic DOM replacement. Forms, navigation, frames, resource downloads,
+      uploads, media, popup refusals, and replacement are covered; dialogs stay
+      pending with the capability unadvertised.
 - [x] Add transport contract tests that can run without Zen.
 - [x] Add macOS integration tests against an installed Zen Browser, gated by
       `ZEN_SPIKE=1` and isolated in a fresh throwaway profile.
@@ -557,7 +584,8 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
       avoids relying on YouTube availability.
 - [x] Assert selected tab, focused window, visible Space, playback state, and
       playback time around the combined background open, move, navigate, reload,
-      inspect, and close scenario.
+      inspect, semantic interaction, history, and close scenario. The complete
+      interaction proof passed three consecutive headed runs.
 - [ ] Test Personal and Work Space routing in separate windows and in the same
       window.
 - [ ] Test Zen restart, daemon restart, sleep/wake, network loss, crashed tabs,
@@ -580,8 +608,11 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 - [x] Document privacy defaults, redaction, and log locations.
 - [x] Add a troubleshooting guide for connection failures, unsupported Zen
       versions, stale tabs, ambiguous routing, and extension/native-host setup.
-- [ ] Add a diagnostic command that reports versions, capabilities, connection
-      state, and sanitized configuration without exposing secrets.
+- [x] Add a diagnostic command that reports versions, capabilities, connection
+      state, and sanitized configuration without exposing secrets. `doctor`
+      reports the configured/running profile match, Zen, Gecko, extension,
+      daemon and protocol versions, Downloads writability, private-window
+      policy, and speech asset state without page content or paths.
 - [x] Maintain a supported Zen/Firefox/macOS compatibility matrix.
 - [x] Add architecture diagrams and decision records.
 
@@ -602,14 +633,22 @@ Tracking: [DEV-264](https://linear.app/intuitum/issue/DEV-264)
 - [x] Package and register the Native Messaging host if the chosen transport
       requires one.
 - [ ] Package and sign the Zen/Firefox extension if one is required.
-- [ ] Add semantic versioning and changelog automation.
+- [x] Add semantic versioning and changelog automation. `version:check`
+      validates SemVer and keeps the package, lockfile, extension manifest, and
+      dated changelog heading synchronized as part of `npm run check`.
 - [ ] Add release CI, provenance, checksums, and an SBOM. A release-triggered
       workflow now builds an offline-capable bundled Node tarball, unsigned XPI,
       SPDX SBOM, checksums, provenance attestation, and Homebrew formula, then
       uploads the assets. Keep this open until the first tagged release proves
       the workflow with tag protection configured.
 - [ ] Add macOS code signing/notarization if distributing native executables.
-- [ ] Add an upgrade path for configuration and daemon protocol versions.
+- [x] Add an upgrade path for configuration and daemon protocol versions. Schema
+      1 has an explicit atomic migration to conservative schema 2 defaults.
+      Daemon mismatch errors now report machine-readable expected/received
+      versions and a non-retryable all-component recovery action;
+      [Upgrade and rollback](../docs/upgrading.md) documents package,
+      native-host, extension, configuration, restart, verification, and rollback
+      order. Clean-machine execution remains separately open below.
 - [ ] Run a clean-machine install, upgrade, rollback, and uninstall test.
 - [x] Publish nothing and deploy nothing until explicitly approved. Only local
       dry-run and temporary package-install verification were performed.
@@ -645,11 +684,15 @@ The first usable release is complete only when all of the following are true:
       or both? **Both.** A Space is Zen-only state (`uuid`, `name`, in
       `zen-sessions.jsonlz4`) that optionally binds a container via
       `containerTabId`. Essential tabs sit outside every Space.
-- [ ] Can all required page operations run against a non-selected tab? Navigate,
-      evaluate, type, and screenshot: yes. Background timer throttling applies,
-      so in-page polling is unreliable.
+- [x] Can all required accepted page operations run against a non-selected tab?
+      Yes for named DOM operations, screenshots, explicit uploads, bounded
+      resources, media inspection, captions, and transcription inputs. Arbitrary
+      evaluation and dialogs are not required or exposed. Background timer
+      throttling still means in-page polling is unreliable.
 - [x] Can screenshots be captured without selection or compositor side effects?
-      **Yes**, proven headless against a non-selected tab. Re-confirm headed.
+      **Yes**, current-viewport and explicit-element capture passed three
+      consecutive headed runs without selection, focus, Space, cursor, or media
+      interference.
 - [x] Is a privileged extension or Native Messaging host unavoidable? **Yes,
       both.** Nothing else can see a non-visible Space, and a native port is the
       only supported way to keep an MV3 event page alive. Both are now proven
@@ -661,9 +704,10 @@ The first usable release is complete only when all of the following are true:
 - [x] What is the smallest safe page-interaction surface for the first release?
       [The page-interaction direction](../docs/spikes/page-interaction.md)
       selects semantic snapshots and narrowly named operations scoped to
-      explicit tab/frame/generation IDs. Arbitrary evaluation, screenshots,
-      uploads, downloads, and dialogs stay unexposed until their individual
-      safety invariants are proven.
+      explicit tab/frame/generation IDs. Screenshots, explicit uploads, bounded
+      downloads, media inspection, and on-device transcription are now accepted
+      after their individual gates. Arbitrary evaluation and dialogs remain
+      unexposed.
 - [x] Which Zen, Firefox, macOS, and Node versions will be supported initially?
       Zen 1.21.9b / Gecko 153.0 on macOS 27.0 arm64 is the initial
       headed-supported browser environment. Node 24+ is supported by the

@@ -35,9 +35,27 @@ const PAGE_ACTOR_RESOURCE = "zen-agent-page";
 const DEFAULT_INSPECTION_CHARS = 2_000;
 const MAX_INSPECTION_CHARS = 10_000;
 const INSPECTION_TIMEOUT_MS = 8_000;
+const PAGE_OPERATION_TIMEOUT_MS = 8_000;
+const RESOURCE_FETCH_TIMEOUT_MS = 60_000;
+const MEDIA_FETCH_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_PAGE_NODES = 1_000;
+const MAX_PAGE_NODES = 5_000;
+const MAX_PAGE_FRAMES = 128;
+const MAX_PAGE_RESULT_BYTES = 4 * 1024 * 1024;
+const MAX_QUERY_RESULTS = 100;
+const PAGE_REFERENCE_TTL_MS = 60_000;
+const MAX_SNAPSHOTS_PER_TAB = 16;
+const MAX_UPLOAD_FILES = 32;
+const MAX_RESOURCE_BYTES = 2 * 1024 * 1024;
+const MAX_MEDIA_RESOURCE_BYTES = 32 * 1024 * 1024;
+const MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024;
+const MAX_SCREENSHOT_DIMENSION = 4_096;
+const MAX_SCREENSHOT_PIXELS = 16 * 1024 * 1024;
+const ACCEPTED_BACKGROUND_PAGE_BUILD_KEYS = new Set(["1.21.9b/153.0"]);
 let pageActorRegistered = false;
 let pageActorRegistrationError = null;
 let pageActorResourceRegistered = false;
+let extensionVersion = null;
 
 /**
  * Tab attributes worth reporting a change for. `TabAttrModified` is extremely
@@ -143,6 +161,10 @@ async function guardedAsync(operation, run) {
 }
 
 function registerPageActor(context) {
+  extensionVersion =
+    typeof context.extension.manifest?.version === "string"
+      ? context.extension.manifest.version
+      : null;
   if (pageActorRegistered) {
     return;
   }
@@ -163,7 +185,7 @@ function registerPageActor(context) {
     resourceProtocol.setSubstitution(PAGE_ACTOR_RESOURCE, root);
     pageActorResourceRegistered = true;
     ChromeUtils.registerWindowActor(PAGE_ACTOR_NAME, {
-      allFrames: false,
+      allFrames: true,
       matches: ["http://*/*", "https://*/*"],
       parent: {
         esModuleURI: `resource://${PAGE_ACTOR_RESOURCE}/actors/ZenAgentPageParent.sys.mjs`,
@@ -254,6 +276,131 @@ function anyWindow() {
   return win;
 }
 
+function currentBuildKey() {
+  return `${Services.appinfo.version}/${Services.appinfo.platformVersion}`;
+}
+
+function hiddenDomWindow() {
+  try {
+    return Services.appShell.hiddenDOMWindow;
+  } catch {
+    return null;
+  }
+}
+
+function pageActorPrimitive() {
+  return pageActorRegistered;
+}
+
+function historyPrimitive(win) {
+  const browser = win.gBrowser.selectedBrowser;
+  return (
+    pageActorPrimitive() &&
+    typeof browser?.goBack === "function" &&
+    typeof browser?.goForward === "function"
+  );
+}
+
+function uploadPrimitive() {
+  const hidden = hiddenDomWindow();
+  return (
+    pageActorPrimitive() &&
+    typeof hidden?.File?.createFromFileName === "function" &&
+    typeof hidden?.HTMLInputElement?.prototype?.mozSetFileArray === "function"
+  );
+}
+
+function streamingFetchPrimitive() {
+  const hidden = hiddenDomWindow();
+  return (
+    pageActorPrimitive() &&
+    typeof hidden?.fetch === "function" &&
+    typeof hidden?.ReadableStream === "function" &&
+    hidden?.Response?.prototype !== undefined &&
+    "body" in hidden.Response.prototype
+  );
+}
+
+function mediaPrimitive() {
+  const hidden = hiddenDomWindow();
+  return (
+    streamingFetchPrimitive() &&
+    typeof hidden?.HTMLMediaElement === "function" &&
+    typeof hidden?.TextTrack === "function"
+  );
+}
+
+function screenshotPrimitive(win) {
+  const globals = [
+    hiddenDomWindow()?.browsingContext?.currentWindowGlobal,
+    win?.browsingContext?.currentWindowGlobal,
+  ];
+
+  // Capability discovery runs before the fixture's first content tab is
+  // necessarily loaded. Inspect every already-live browsing context, but do
+  // not make support depend on the selected tab or trigger a load to create
+  // one.
+  for (const tab of win?.gZenWorkspaces?.allStoredTabs ?? []) {
+    globals.push(tab?.linkedBrowser?.browsingContext?.currentWindowGlobal);
+  }
+
+  return (
+    pageActorPrimitive() &&
+    globals.some(
+      (windowGlobal) => typeof windowGlobal?.drawSnapshot === "function",
+    )
+  );
+}
+
+/**
+ * Each accepted page capability has its own build gate and primitive probe.
+ *
+ * The gates currently contain the same exact headed-proof tuple, but remain
+ * separate entries so proving one new surface never advertises its siblings.
+ * A probe is deliberately read-only and must not load a tab or instantiate UI.
+ */
+const PAGE_CAPABILITY_SPECS = [
+  { name: "browser.pages.inspect", probe: pageActorPrimitive },
+  { name: "browser.pages.snapshot", probe: pageActorPrimitive },
+  { name: "browser.pages.query", probe: pageActorPrimitive },
+  { name: "browser.pages.click", probe: pageActorPrimitive },
+  { name: "browser.pages.fill", probe: pageActorPrimitive },
+  { name: "browser.pages.type", probe: pageActorPrimitive },
+  { name: "browser.pages.press", probe: pageActorPrimitive },
+  { name: "browser.pages.select", probe: pageActorPrimitive },
+  { name: "browser.pages.check", probe: pageActorPrimitive },
+  { name: "browser.pages.submit", probe: pageActorPrimitive },
+  { name: "browser.pages.history", probe: historyPrimitive },
+  { name: "browser.pages.upload", probe: uploadPrimitive },
+  { name: "browser.pages.media", probe: mediaPrimitive },
+  { name: "browser.pages.resource-fetch", probe: streamingFetchPrimitive },
+  { name: "browser.pages.screenshot", probe: screenshotPrimitive },
+].map((spec) => ({
+  ...spec,
+  acceptedBuilds: ACCEPTED_BACKGROUND_PAGE_BUILD_KEYS,
+}));
+
+function acceptedPageCapabilities(win, tab) {
+  const build = currentBuildKey();
+  const found = [];
+
+  for (const spec of PAGE_CAPABILITY_SPECS) {
+    if (!spec.acceptedBuilds.has(build)) {
+      continue;
+    }
+
+    try {
+      if (spec.probe(win, tab)) {
+        found.push(spec.name);
+      }
+    } catch {
+      // A missing or throwing primitive means the capability is unavailable.
+    }
+  }
+
+  return found;
+}
+
 /**
  * Probe for the internals this transport depends on.
  *
@@ -311,9 +458,7 @@ function capabilities() {
     found.push("browser.tabs.media-state");
   }
 
-  if (pageActorRegistered) {
-    found.push("browser.pages.inspect");
-  }
+  found.push(...acceptedPageCapabilities(win, tab));
 
   return found;
 }
@@ -327,6 +472,7 @@ function describe() {
     sessionId: sessionToken,
     browserVersion: Services.appinfo.version,
     geckoVersion: Services.appinfo.platformVersion,
+    extensionVersion,
     capabilities: capabilities(),
     profileName: null,
     isDefaultProfile: null,
@@ -680,10 +826,758 @@ async function inspectPage(tabId, options) {
   }
 }
 
+/**
+ * Page content is never retained here. A live snapshot stores only opaque
+ * routing and generation metadata needed to address the right WindowGlobal.
+ */
+const pageSnapshots = new Map();
+
+function pageUuid() {
+  return Services.uuid.generateUUID().toString().slice(1, -1);
+}
+
+function utf8ByteLength(value) {
+  let bytes = 0;
+
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+
+    if (codePoint <= 0x7f) {
+      bytes += 1;
+    } else if (codePoint <= 0x7ff) {
+      bytes += 2;
+    } else if (codePoint <= 0xffff) {
+      bytes += 3;
+    } else {
+      bytes += 4;
+    }
+  }
+
+  return bytes;
+}
+
+function pageNodeLimit(options) {
+  const requested = options?.maxNodes ?? DEFAULT_PAGE_NODES;
+
+  if (
+    !Number.isInteger(requested) ||
+    requested < 1 ||
+    requested > MAX_PAGE_NODES
+  ) {
+    throw new ZenAgentError(
+      "invalid-request",
+      `maxNodes must be an integer from 1 through ${MAX_PAGE_NODES}.`,
+    );
+  }
+
+  return requested;
+}
+
+function pageQueryLimit(options) {
+  const requested = options?.maxResults ?? 20;
+
+  if (
+    !Number.isInteger(requested) ||
+    requested < 1 ||
+    requested > MAX_QUERY_RESULTS
+  ) {
+    throw new ZenAgentError(
+      "invalid-request",
+      `maxResults must be an integer from 1 through ${MAX_QUERY_RESULTS}.`,
+    );
+  }
+
+  return requested;
+}
+
+function actorForWindowGlobal(windowGlobal) {
+  if (!windowGlobal) {
+    throw new ZenAgentError(
+      "stale-frame",
+      "That frame's current document is unavailable.",
+    );
+  }
+
+  return windowGlobal.getActor(PAGE_ACTOR_NAME);
+}
+
+function topPageContext(tab) {
+  if (lifecycleOf(tab) !== "open" || !tab.linkedBrowser) {
+    throw new ZenAgentError(
+      "unsupported-capability",
+      "That tab has no loaded document to interact with.",
+    );
+  }
+
+  const current = tab.linkedBrowser.currentURI;
+
+  if (!current || !OPENABLE_SCHEMES.has(`${current.scheme}:`)) {
+    throw new ZenAgentError(
+      "unsupported-capability",
+      "Page interaction supports loaded HTTP(S) tabs only.",
+    );
+  }
+
+  const browsingContext = tab.linkedBrowser.browsingContext;
+
+  if (!browsingContext?.currentWindowGlobal) {
+    throw new ZenAgentError(
+      "stale-document",
+      "That tab's current document is unavailable.",
+    );
+  }
+
+  return browsingContext;
+}
+
+async function actorDeadline(
+  operation,
+  promise,
+  timeoutMs = PAGE_OPERATION_TIMEOUT_MS,
+) {
+  let timeout;
+  const deadline = new Promise((_, reject) => {
+    timeout = setActorTimeout(() => {
+      reject(
+        new ZenAgentError(
+          "timeout",
+          `${operation} did not answer within ${timeoutMs}ms.`,
+        ),
+      );
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, deadline]);
+  } finally {
+    clearActorTimeout(timeout);
+  }
+}
+
+function browsingContextChildren(context) {
+  try {
+    return Array.from(context.children ?? []);
+  } catch {
+    return [];
+  }
+}
+
+function browsingContextTree(root) {
+  const result = [];
+  const stack = [{ context: root, parentId: null }];
+
+  while (stack.length > 0 && result.length < MAX_PAGE_FRAMES) {
+    const entry = stack.pop();
+
+    if (entry === undefined) {
+      break;
+    }
+
+    result.push(entry);
+    const children = browsingContextChildren(entry.context);
+
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      const child = children[index];
+
+      if (child !== undefined) {
+        stack.push({ context: child, parentId: entry.context.id });
+      }
+    }
+  }
+
+  return {
+    entries: result,
+    truncated: stack.length > 0,
+  };
+}
+
+function prunePageSnapshots() {
+  const expiresBefore = Date.now() - PAGE_REFERENCE_TTL_MS;
+
+  for (const [snapshotId, snapshot] of pageSnapshots) {
+    if (snapshot.createdAt < expiresBefore) {
+      pageSnapshots.delete(snapshotId);
+    }
+  }
+}
+
+function rememberPageSnapshot(snapshot) {
+  prunePageSnapshots();
+
+  const sameTab = [...pageSnapshots.entries()].filter(
+    ([, candidate]) => candidate.tabId === snapshot.tabId,
+  );
+
+  while (sameTab.length >= MAX_SNAPSHOTS_PER_TAB) {
+    const oldest = sameTab.shift();
+
+    if (oldest !== undefined) {
+      pageSnapshots.delete(oldest[0]);
+    }
+  }
+
+  pageSnapshots.set(snapshot.snapshotId, snapshot);
+}
+
+async function snapshotPage(tabId, options) {
+  if (!pageActorRegistered) {
+    throw new ZenAgentError(
+      "unsupported-capability",
+      "The page-interaction actor is unavailable.",
+    );
+  }
+
+  const tab = resolve(tabId);
+  windowOf(tab);
+  const root = topPageContext(tab);
+  const maxNodes = pageNodeLimit(options);
+  const snapshotId = pageUuid();
+  const tree = browsingContextTree(root);
+  const frameRefByContextId = new Map(
+    tree.entries.map(({ context }) => [context.id, pageUuid()]),
+  );
+  const frames = [];
+  const nodes = [];
+  const routing = new Map();
+  let nodesTruncated = false;
+  let stringsTruncated = false;
+  let topDocumentId = null;
+  let topTitle = "";
+
+  for (const { context, parentId } of tree.entries) {
+    const frameRef = frameRefByContextId.get(context.id);
+
+    if (frameRef === undefined) {
+      continue;
+    }
+
+    const parentFrameRef =
+      parentId === null ? null : (frameRefByContextId.get(parentId) ?? null);
+    const windowGlobal = context.currentWindowGlobal;
+
+    if (!windowGlobal) {
+      frames.push({
+        frameRef,
+        parentFrameRef,
+        documentId: null,
+        url: "",
+        loadState: "unavailable",
+        availability: "stale",
+      });
+      continue;
+    }
+
+    let frame;
+
+    try {
+      frame = await actorDeadline(
+        "Page snapshot",
+        actorForWindowGlobal(windowGlobal).snapshot({
+          snapshotId,
+          maxNodes: Math.max(1, maxNodes - nodes.length),
+        }),
+      );
+    } catch (error) {
+      if (context === root) {
+        throw error;
+      }
+
+      frames.push({
+        frameRef,
+        parentFrameRef,
+        documentId: null,
+        url: "",
+        loadState: "unavailable",
+        availability: "unsupported",
+      });
+      continue;
+    }
+
+    if (context === root) {
+      topDocumentId = frame.documentId;
+      topTitle = frame.title;
+    }
+
+    frames.push({
+      frameRef,
+      parentFrameRef,
+      documentId: frame.documentId,
+      url: frame.url,
+      loadState: frame.loadState,
+      availability: "available",
+    });
+    routing.set(frameRef, {
+      browsingContextId: context.id,
+      documentId: frame.documentId,
+    });
+
+    for (const node of frame.nodes) {
+      nodes.push({ ...node, frameRef });
+    }
+
+    nodesTruncated ||= Boolean(frame.truncated);
+    stringsTruncated ||= Boolean(frame.stringsTruncated);
+
+    if (nodes.length >= maxNodes) {
+      nodesTruncated = true;
+      break;
+    }
+  }
+
+  if (topDocumentId === null) {
+    throw new ZenAgentError(
+      "stale-document",
+      "The top-level document changed during the snapshot.",
+    );
+  }
+
+  const currentTop = await actorDeadline(
+    "Document validation",
+    actorForWindowGlobal(root.currentWindowGlobal).documentInfo(),
+  );
+
+  if (currentTop.documentId !== topDocumentId) {
+    throw new ZenAgentError(
+      "stale-document",
+      "The top-level document changed during the snapshot.",
+    );
+  }
+
+  const capturedAt = new Date().toISOString();
+  const result = {
+    schemaVersion: 1,
+    snapshotId,
+    documentId: topDocumentId,
+    tabId,
+    capturedAt,
+    url: frames[0]?.url ?? "",
+    title: topTitle,
+    loadState: frames[0]?.loadState ?? "loading",
+    rootFrameRef: frameRefByContextId.get(root.id),
+    frames,
+    nodes,
+    truncation: {
+      frames: tree.truncated || frames.length < tree.entries.length,
+      nodes: nodesTruncated,
+      strings: stringsTruncated,
+      totalBytes: false,
+    },
+  };
+
+  if (utf8ByteLength(JSON.stringify(result)) > MAX_PAGE_RESULT_BYTES) {
+    throw new ZenAgentError(
+      "payload-too-large",
+      "The page snapshot exceeded its serialized result ceiling.",
+    );
+  }
+
+  rememberPageSnapshot({
+    snapshotId,
+    tabId,
+    documentId: topDocumentId,
+    createdAt: Date.now(),
+    routing,
+  });
+  return result;
+}
+
+function pageSnapshotFor(target) {
+  prunePageSnapshots();
+  const snapshot = pageSnapshots.get(target.snapshotId);
+
+  if (snapshot === undefined) {
+    throw new ZenAgentError("stale-element", "That page snapshot has expired.");
+  }
+
+  if (snapshot.tabId !== target.tabId) {
+    throw new ZenAgentError(
+      "policy-rejection",
+      "The page snapshot does not belong to that tab.",
+    );
+  }
+
+  if (
+    snapshot.documentId !== target.documentId ||
+    typeof target.frameRef !== "string"
+  ) {
+    throw new ZenAgentError(
+      "stale-document",
+      "That document reference is stale.",
+    );
+  }
+
+  return snapshot;
+}
+
+function contextById(root, id) {
+  return browsingContextTree(root).entries.find(
+    ({ context }) => context.id === id,
+  )?.context;
+}
+
+async function resolvedPageActor(target, mutation) {
+  const snapshot = pageSnapshotFor(target);
+  const tab = resolve(target.tabId);
+
+  if (mutation) {
+    safeMutationWindow(tab);
+  } else {
+    windowOf(tab);
+  }
+
+  const root = topPageContext(tab);
+  const top = await actorDeadline(
+    "Document validation",
+    actorForWindowGlobal(root.currentWindowGlobal).documentInfo(),
+  );
+
+  if (top.documentId !== snapshot.documentId) {
+    throw new ZenAgentError(
+      "stale-document",
+      "The top-level document reference is stale.",
+    );
+  }
+
+  const route = snapshot.routing.get(target.frameRef);
+
+  if (route === undefined) {
+    throw new ZenAgentError("stale-frame", "That frame reference is stale.");
+  }
+
+  const context = contextById(root, route.browsingContextId);
+
+  if (!context?.currentWindowGlobal) {
+    throw new ZenAgentError("stale-frame", "That frame is no longer attached.");
+  }
+
+  const windowGlobal = context.currentWindowGlobal;
+  const actor = actorForWindowGlobal(windowGlobal);
+  const current = await actorDeadline("Frame validation", actor.documentInfo());
+
+  if (current.documentId !== route.documentId) {
+    throw new ZenAgentError(
+      "stale-frame",
+      "That frame's document reference is stale.",
+    );
+  }
+
+  return { actor, frameDocumentId: route.documentId, windowGlobal };
+}
+
+async function queryPage(target, options) {
+  const { actor, frameDocumentId } = await resolvedPageActor(target, false);
+  const result = await actorDeadline(
+    "Page query",
+    actor.query({
+      snapshotId: target.snapshotId,
+      documentId: frameDocumentId,
+      locator: options.locator,
+      maxResults: pageQueryLimit(options),
+    }),
+  );
+
+  return {
+    nodes: result.nodes.map((node) => ({
+      ...node,
+      frameRef: target.frameRef,
+    })),
+    truncated: result.truncated,
+  };
+}
+
+async function mutatePage(operation, target, options = {}) {
+  if (typeof target?.elementRef !== "string") {
+    throw new ZenAgentError(
+      "invalid-request",
+      "A page mutation requires an explicit element reference.",
+    );
+  }
+
+  const { actor, frameDocumentId } = await resolvedPageActor(target, true);
+  const result = await actorDeadline(
+    `Page ${operation}`,
+    actor.mutate({
+      ...options,
+      operation,
+      snapshotId: target.snapshotId,
+      documentId: frameDocumentId,
+      elementRef: target.elementRef,
+    }),
+  );
+  return {
+    performed: true,
+    documentId: target.documentId,
+    ...(result.fileCount === undefined ? {} : { fileCount: result.fileCount }),
+  };
+}
+
+function resourceByteLimit(options, maximum = MAX_RESOURCE_BYTES) {
+  const requested = options?.maxBytes ?? maximum;
+
+  if (!Number.isInteger(requested) || requested < 1 || requested > maximum) {
+    throw new ZenAgentError(
+      "invalid-request",
+      `maxBytes must be an integer from 1 through ${maximum}.`,
+    );
+  }
+
+  return requested;
+}
+
+async function uploadPage(target, paths) {
+  if (
+    !Array.isArray(paths) ||
+    paths.length < 1 ||
+    paths.length > MAX_UPLOAD_FILES ||
+    !paths.every(
+      (path) =>
+        typeof path === "string" && path.length > 0 && path.length <= 4_096,
+    )
+  ) {
+    throw new ZenAgentError(
+      "invalid-request",
+      `Upload requires 1 through ${MAX_UPLOAD_FILES} staged file paths.`,
+    );
+  }
+
+  const files = [];
+  const parentFile = Services.appShell.hiddenDOMWindow.File;
+  for (const path of paths) {
+    try {
+      files.push(await parentFile.createFromFileName(path));
+    } catch {
+      throw new ZenAgentError(
+        "invalid-request",
+        "An explicit staged upload file is unavailable.",
+      );
+    }
+  }
+
+  return mutatePage("upload", target, { files });
+}
+
+async function listPageMedia(target) {
+  const { actor, frameDocumentId } = await resolvedPageActor(target, false);
+  const result = await actorDeadline(
+    "Media inspection",
+    actor.media({
+      snapshotId: target.snapshotId,
+      documentId: frameDocumentId,
+    }),
+  );
+
+  return {
+    media: result.media.map((media) => ({
+      ...media,
+      frameRef: target.frameRef,
+    })),
+    truncated: result.truncated,
+  };
+}
+
+async function fetchPageResource(target, url, options) {
+  if (typeof url !== "string" || url.length < 1 || url.length > 64 * 1024) {
+    throw new ZenAgentError(
+      "invalid-request",
+      "A bounded resource URL is required.",
+    );
+  }
+
+  const { actor, frameDocumentId } = await resolvedPageActor(target, false);
+  return actorDeadline(
+    "Resource fetch",
+    actor.resource({
+      documentId: frameDocumentId,
+      url,
+      maxBytes: resourceByteLimit(options),
+    }),
+    RESOURCE_FETCH_TIMEOUT_MS,
+  );
+}
+
+async function fetchPageMedia(target, options) {
+  if (typeof target?.elementRef !== "string") {
+    throw new ZenAgentError(
+      "invalid-request",
+      "Media fetch requires an explicit media element reference.",
+    );
+  }
+
+  const { actor, frameDocumentId } = await resolvedPageActor(target, false);
+  return actorDeadline(
+    "Media resource fetch",
+    actor.mediaResource({
+      snapshotId: target.snapshotId,
+      documentId: frameDocumentId,
+      elementRef: target.elementRef,
+      maxBytes: resourceByteLimit(options, MAX_MEDIA_RESOURCE_BYTES),
+    }),
+    MEDIA_FETCH_TIMEOUT_MS,
+  );
+}
+
+function screenshotScale(options) {
+  const scale = options?.scale ?? 1;
+
+  if (
+    typeof scale !== "number" ||
+    !Number.isFinite(scale) ||
+    scale < 0.25 ||
+    scale > 2
+  ) {
+    throw new ZenAgentError(
+      "invalid-request",
+      "Screenshot scale must be between 0.25 and 2.",
+    );
+  }
+
+  return scale;
+}
+
+function screenshotBackground(options) {
+  const background = options?.background ?? "transparent";
+
+  if (
+    typeof background !== "string" ||
+    !(
+      background === "transparent" ||
+      /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/iu.test(background)
+    )
+  ) {
+    throw new ZenAgentError(
+      "invalid-request",
+      "Screenshot background must be transparent or a six/eight digit hex color.",
+    );
+  }
+
+  return background;
+}
+
+async function screenshotPage(target, options) {
+  const { actor, frameDocumentId, windowGlobal } = await resolvedPageActor(
+    target,
+    false,
+  );
+
+  if (typeof windowGlobal.drawSnapshot !== "function") {
+    throw new ZenAgentError(
+      "unsupported-capability",
+      "This Gecko build does not expose background WindowGlobal snapshots.",
+    );
+  }
+
+  const rect = await actorDeadline(
+    "Screenshot geometry",
+    actor.screenshotRect({
+      snapshotId: target.snapshotId,
+      documentId: frameDocumentId,
+      ...(typeof target.elementRef === "string"
+        ? { elementRef: target.elementRef }
+        : {}),
+    }),
+  );
+  const scale = screenshotScale(options);
+  const width = Math.ceil(rect.width * scale);
+  const height = Math.ceil(rect.height * scale);
+
+  if (
+    width < 1 ||
+    height < 1 ||
+    width > MAX_SCREENSHOT_DIMENSION ||
+    height > MAX_SCREENSHOT_DIMENSION ||
+    width * height > MAX_SCREENSHOT_PIXELS
+  ) {
+    throw new ZenAgentError(
+      "payload-too-large",
+      "The screenshot dimensions exceed the background capture ceiling.",
+    );
+  }
+
+  const win = windowOf(resolve(target.tabId));
+  const image = await actorDeadline(
+    "Background screenshot",
+    windowGlobal.drawSnapshot(
+      new win.DOMRect(rect.x, rect.y, rect.width, rect.height),
+      scale,
+      screenshotBackground(options),
+      false,
+    ),
+  );
+  const canvas = win.document.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "canvas",
+  );
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    image.close?.();
+    throw new ZenAgentError(
+      "unsupported-capability",
+      "The browser could not encode the background snapshot.",
+    );
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+  image.close?.();
+  const encoded = canvas.toDataURL("image/png");
+  const dataBase64 = encoded.slice(encoded.indexOf(",") + 1);
+  const bytes = win.atob(dataBase64).length;
+
+  if (bytes > MAX_SCREENSHOT_BYTES) {
+    throw new ZenAgentError(
+      "payload-too-large",
+      "The encoded screenshot exceeds the byte ceiling.",
+    );
+  }
+
+  return { mimeType: "image/png", width, height, bytes, dataBase64 };
+}
+
+async function pageHistory(direction, target) {
+  const tab = resolve(target.tabId);
+  safeMutationWindow(tab);
+  const root = topPageContext(tab);
+  const top = await actorDeadline(
+    "Document validation",
+    actorForWindowGlobal(root.currentWindowGlobal).documentInfo(),
+  );
+
+  if (top.documentId !== target.documentId) {
+    throw new ZenAgentError(
+      "stale-document",
+      "That top-level document reference is stale.",
+    );
+  }
+
+  const browser = tab.linkedBrowser;
+  const canTravel =
+    direction === "back" ? browser.canGoBack : browser.canGoForward;
+  const travel = direction === "back" ? browser.goBack : browser.goForward;
+
+  if (!canTravel || typeof travel !== "function") {
+    throw new ZenAgentError(
+      "unsupported-capability",
+      `That tab cannot navigate ${direction}.`,
+    );
+  }
+
+  travel.call(browser);
+  return { performed: true, documentId: target.documentId };
+}
+
 function closeTab(tabId) {
   const tab = resolve(tabId);
   safeMutationWindow(tab).gBrowser.removeTab(tab);
   identity.byId.delete(tabId);
+
+  for (const [snapshotId, snapshot] of pageSnapshots) {
+    if (snapshot.tabId === tabId) {
+      pageSnapshots.delete(snapshotId);
+    }
+  }
+
   return {};
 }
 
@@ -704,6 +1598,44 @@ var zenAgent = class extends ExtensionAPI {
           guarded("reloadTab", () => reloadTab(tabId)),
         inspectPage: async (tabId, options) =>
           guardedAsync("inspectPage", () => inspectPage(tabId, options)),
+        snapshotPage: async (tabId, options) =>
+          guardedAsync("snapshotPage", () => snapshotPage(tabId, options)),
+        queryPage: async (target, options) =>
+          guardedAsync("queryPage", () => queryPage(target, options)),
+        clickPage: async (target) =>
+          guardedAsync("clickPage", () => mutatePage("click", target)),
+        fillPage: async (target, value) =>
+          guardedAsync("fillPage", () => mutatePage("fill", target, { value })),
+        typePage: async (target, value) =>
+          guardedAsync("typePage", () => mutatePage("type", target, { value })),
+        pressPage: async (target, options) =>
+          guardedAsync("pressPage", () => mutatePage("press", target, options)),
+        selectPage: async (target, values) =>
+          guardedAsync("selectPage", () =>
+            mutatePage("select", target, { values }),
+          ),
+        checkPage: async (target) =>
+          guardedAsync("checkPage", () => mutatePage("check", target)),
+        uncheckPage: async (target) =>
+          guardedAsync("uncheckPage", () => mutatePage("uncheck", target)),
+        submitPage: async (target) =>
+          guardedAsync("submitPage", () => mutatePage("submit", target)),
+        uploadPage: async (target, paths) =>
+          guardedAsync("uploadPage", () => uploadPage(target, paths)),
+        listPageMedia: async (target) =>
+          guardedAsync("listPageMedia", () => listPageMedia(target)),
+        fetchPageMedia: async (target, options) =>
+          guardedAsync("fetchPageMedia", () => fetchPageMedia(target, options)),
+        fetchPageResource: async (target, url, options) =>
+          guardedAsync("fetchPageResource", () =>
+            fetchPageResource(target, url, options),
+          ),
+        screenshotPage: async (target, options) =>
+          guardedAsync("screenshotPage", () => screenshotPage(target, options)),
+        backPage: async (target) =>
+          guardedAsync("backPage", () => pageHistory("back", target)),
+        forwardPage: async (target) =>
+          guardedAsync("forwardPage", () => pageHistory("forward", target)),
         closeTab: async (tabId) => guarded("closeTab", () => closeTab(tabId)),
 
         onChanged: new ExtensionCommon.EventManager({
@@ -726,6 +1658,16 @@ var zenAgent = class extends ExtensionAPI {
               }
 
               switch (event.type) {
+                case "TabSelect":
+                  // Observation only: never set selectedTab here. Publishing the
+                  // newly selected target lets the daemon revoke any lease and
+                  // outstanding page references immediately as user takeover.
+                  emit({
+                    event: "tab.updated",
+                    windowId: identify(win),
+                    tab: describeTab(win, tab),
+                  });
+                  break;
                 case "TabOpen":
                   emit({
                     event: "tab.created",
@@ -763,13 +1705,23 @@ var zenAgent = class extends ExtensionAPI {
             };
 
             const listen = (win) => {
-              for (const type of ["TabOpen", "TabClose", "TabAttrModified"]) {
+              for (const type of [
+                "TabSelect",
+                "TabOpen",
+                "TabClose",
+                "TabAttrModified",
+              ]) {
                 win.addEventListener(type, onTabEvent, true);
               }
             };
 
             const unlisten = (win) => {
-              for (const type of ["TabOpen", "TabClose", "TabAttrModified"]) {
+              for (const type of [
+                "TabSelect",
+                "TabOpen",
+                "TabClose",
+                "TabAttrModified",
+              ]) {
                 win.removeEventListener(type, onTabEvent, true);
               }
             };

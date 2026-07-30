@@ -1,6 +1,7 @@
 import {
   CONFIG_SCHEMA_VERSION,
   ConfigValidationError,
+  DEFAULT_DOWNLOAD_DIRECTORY,
   parseConfig,
   type SpaceMappings,
 } from "./schema.js";
@@ -74,6 +75,11 @@ export function mapDiscoveredSpaces(
     return parseConfig({
       version: CONFIG_SCHEMA_VERSION,
       profile: "discovery-validation",
+      profileMatch: "exact",
+      privateWindows: "hidden",
+      downloads: { directory: DEFAULT_DOWNLOAD_DIRECTORY },
+      backgroundLaunch: { policy: "disabled" },
+      speech: { installedLocales: [] },
       spaces,
       routing: { rules: [] },
     }).spaces;

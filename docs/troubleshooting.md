@@ -54,6 +54,18 @@ This code can also mean a build lacks a required Zen internal. Capability
 probing fails closed rather than attempting an operation that might switch a
 Space or select a tab.
 
+## `protocol-version-mismatch`
+
+The setup CLI, MCP adapter, native host, and extension were installed from
+different releases. The structured error sets `retryable` and `performed` to
+`false` and reports the expected and received versions. Do not retry the
+workflow against the same processes.
+
+Follow [Upgrade and rollback](upgrading.md): upgrade the package, repair the
+native host, replace the extension with the XPI from the same release, migrate
+configuration when requested, restart Zen, and run `zen-agent doctor --json`.
+The daemon is browser-launched and cannot safely upgrade itself in place.
+
 ## `stale-id`
 
 Opaque entity IDs are scoped to one browser session. A browser or native-host
@@ -111,19 +123,21 @@ file for isolated testing.
 
 ## Page inspection and interaction
 
-The daemon supports bounded, read-only `pages.inspect` for an explicitly
-identified loaded HTTP(S) tab. It returns URL, title, load state, and visible
-text. The setup CLI intentionally has no page operations, and the current MCP
-adapter does not yet expose a corresponding tool.
+The MCP surface supports bounded semantic snapshots and queries, DOM-only form
+interaction, screenshots, explicit picker-free uploads, bounded resource
+downloads, and media inspection/transcription on an explicitly identified loaded
+HTTP(S) tab. The setup CLI intentionally has no page operations. See
+[Background page interaction](page-interaction.md) for the capability and
+recovery contracts.
 
-An `unsupported-capability` from the daemon inspection path can mean the tab is
-discarded, crashed, not loaded, non-HTTP(S), or running on an unproven browser
-build. A `timeout` means the dedicated actor did not answer its bounded parent
-deadline; Zen Agent will not activate the tab as a fallback.
+An `unsupported-capability` can mean the tab is discarded, crashed, not loaded,
+non-HTTP(S), or running on an unproven browser build. A `timeout` means the
+dedicated actor did not answer its bounded parent deadline; Zen Agent will not
+activate the tab as a fallback.
 
-There is still no semantic snapshot, element lookup, click, type, fill,
-screenshot, upload, download, dialog, or arbitrary JavaScript API. That absence
-is not a daemon outage.
+Dialogs, native/trusted input, arbitrary JavaScript, arbitrary popups,
+browser-managed downloads, permission UI, and native file pickers remain
+unsupported. Their absence is not a daemon outage.
 
 ## Collecting a useful report
 

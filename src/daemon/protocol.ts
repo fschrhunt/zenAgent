@@ -12,6 +12,8 @@ import {
 } from "../security/limits.js";
 
 export const DAEMON_PROTOCOL_VERSION = 1;
+export const DAEMON_PROTOCOL_RECOVERY =
+  "upgrade-client-host-and-extension-together";
 export const DEFAULT_DAEMON_MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_DAEMON_IDENTIFIER_BYTES = 256;
 export const MAX_DAEMON_IDEMPOTENCY_KEY_BYTES = 512;
@@ -26,12 +28,35 @@ export const DAEMON_METHODS = [
   "registry.refresh",
   "config.reload",
   "pages.inspect",
+  "pages.snapshot",
+  "pages.query",
+  "pages.wait",
+  "pages.click",
+  "pages.fill",
+  "pages.type",
+  "pages.press",
+  "pages.select",
+  "pages.check",
+  "pages.uncheck",
+  "pages.submit",
+  "pages.upload",
+  "pages.screenshot",
+  "pages.media.list",
+  "pages.media.transcribe",
+  "pages.resource.download",
+  "pages.back",
+  "pages.forward",
   "tabs.resolve",
   "tabs.open",
   "tabs.navigate",
   "tabs.reload",
   "tabs.close",
+  "tabs.cleanup",
   "tabs.move",
+  "tabs.lease.acquire",
+  "tabs.lease.renew",
+  "tabs.lease.release",
+  "operations.cancel",
   "daemon.shutdown",
 ] as const;
 
@@ -44,10 +69,15 @@ export type DaemonErrorCode =
   | "browser-unavailable"
   | "unsupported-capability"
   | "stale-id"
+  | "stale-document"
+  | "stale-frame"
+  | "stale-element"
   | "timeout"
   | "payload-too-large"
   | "already-running"
   | "policy-rejection"
+  | "lease-conflict"
+  | "cancelled"
   | "internal";
 
 export interface DaemonErrorBody {
@@ -108,6 +138,34 @@ export class DaemonProtocolError extends Error {
   }
 }
 
+/**
+ * Produce one stable, content-free recovery contract on both sides of the
+ * socket. A protocol mismatch is never safe to retry against the same
+ * processes: every installed Zen Agent component must be upgraded together,
+ * then the browser-provided daemon must be restarted.
+ */
+export function daemonProtocolVersionMismatch(
+  receivedProtocolVersion: unknown,
+): DaemonProtocolError {
+  return new DaemonProtocolError(
+    "protocol-version-mismatch",
+    `This Zen Agent component speaks daemon protocol version ${String(DAEMON_PROTOCOL_VERSION)}. Upgrade the client, native host, and extension together, restart Zen, then run zen-agent doctor.`,
+    {
+      reason: "protocol-version-mismatch",
+      retryable: false,
+      performed: false,
+      resource: "daemon-protocol",
+      recovery: DAEMON_PROTOCOL_RECOVERY,
+      expectedProtocolVersion: DAEMON_PROTOCOL_VERSION,
+      receivedProtocolVersion:
+        typeof receivedProtocolVersion === "number" &&
+        Number.isSafeInteger(receivedProtocolVersion)
+          ? receivedProtocolVersion
+          : null,
+    },
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -152,10 +210,7 @@ export function parseDaemonRequest(value: unknown): DaemonRequest {
   }
 
   if (value["protocolVersion"] !== DAEMON_PROTOCOL_VERSION) {
-    throw new DaemonProtocolError(
-      "protocol-version-mismatch",
-      `This daemon speaks protocol version ${String(DAEMON_PROTOCOL_VERSION)}; the client sent ${JSON.stringify(value["protocolVersion"])}.`,
-    );
+    throw daemonProtocolVersionMismatch(value["protocolVersion"]);
   }
 
   if (value["type"] !== "request") {

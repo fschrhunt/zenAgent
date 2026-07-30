@@ -258,6 +258,50 @@ describe("runCli", () => {
     `);
   });
 
+  it("reports sanitized doctor policy and speech state", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const harness = cliHarness(() => ({
+      state: "connected",
+      daemonVersion: "0.1.0",
+      protocolVersion: 1,
+      profileId: "opaque-profile",
+      compatibility: {
+        browserVersion: "1.21.9b",
+        geckoVersion: "153.0",
+        extensionVersion: "0.1.0",
+      },
+      counts: { spaces: 2, tabs: 4 },
+    }));
+
+    await expect(
+      runCli(["doctor", "--json"], {
+        ...harness.dependencies,
+        inspectNativeHost: () => ({
+          status: "installed",
+          manifestPath: "/private/manifest",
+          launcherPath: "/private/launcher",
+        }),
+        inspectSpeechHelper: () => ({
+          status: "available",
+          contractVersion: 1,
+        }),
+        speechLocales: () => ({
+          supportedLocales: ["en-US"],
+          installedLocales: ["en-US"],
+        }),
+        inspectDownloadDirectory: () => Promise.resolve("writable"),
+      }),
+    ).resolves.toBe(0);
+
+    const output = String(stdout.mock.calls[0]?.[0]);
+    expect(output).toContain('"privateWindows": "hidden"');
+    expect(output).toContain('"downloadsStatus": "writable"');
+    expect(output).toContain('"browserVersion": "1.21.9b"');
+    expect(output).toContain('"extensionVersion": "0.1.0"');
+    expect(output).toContain('"installedLocales": [');
+    expect(output).not.toContain("/private/");
+  });
+
   it.each([
     ["browser-unavailable", CLI_EXIT_CODES.browserUnavailable],
     ["unsupported-capability", CLI_EXIT_CODES.unsupportedCapability],
@@ -361,6 +405,89 @@ describe("runCli", () => {
           personal: fixture.space.id.transportId,
           aliases: { research: fixture.space.id.transportId },
         },
+      }),
+    );
+  });
+
+  it("explicitly installs a speech locale and records it in config v2", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const write = vi.fn(() => Promise.resolve());
+    const existing = {
+      version: 1,
+      profile: "profile",
+      spaces: { personal: "space", aliases: {} },
+      routing: { rules: [] },
+    } satisfies ZenAgentConfig;
+
+    await expect(
+      runCli(["speech", "install", "--locale", "en-US", "--json"], {
+        configPath: () => "/tmp/config.json",
+        readConfig: () => Promise.resolve(existing),
+        writeConfig: write,
+        installSpeechLocale: () => ({ locale: "en-US", installed: true }),
+      }),
+    ).resolves.toBe(0);
+
+    expect(write).toHaveBeenCalledWith(
+      "/tmp/config.json",
+      expect.objectContaining({
+        version: 2,
+        speech: { installedLocales: ["en-US"] },
+        privateWindows: "hidden",
+        backgroundLaunch: { policy: "disabled" },
+      }),
+    );
+    expect(stdout).toHaveBeenCalled();
+  });
+
+  it("transcribes prerecorded audio without daemon access", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const transcribe = vi.fn(() => ({
+      locale: "en-US",
+      text: "Entirely local",
+    }));
+
+    await expect(
+      runCli(
+        [
+          "speech",
+          "transcribe",
+          "--locale",
+          "en-US",
+          "--input",
+          "/tmp/audio.wav",
+          "--json",
+        ],
+        { transcribeAudio: transcribe },
+      ),
+    ).resolves.toBe(0);
+    expect(transcribe).toHaveBeenCalledWith("en-US", "/tmp/audio.wav");
+    expect(String(stdout.mock.calls[0]?.[0])).toContain("Entirely local");
+  });
+
+  it("rewrites legacy configuration only through explicit migration", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const write = vi.fn(() => Promise.resolve());
+    const existing = {
+      version: 1,
+      profile: "profile",
+      spaces: { personal: "space", aliases: {} },
+      routing: { rules: [] },
+    } satisfies ZenAgentConfig;
+
+    await expect(
+      runCli(["config", "migrate"], {
+        configPath: () => "/tmp/config.json",
+        readConfig: () => Promise.resolve(existing),
+        writeConfig: write,
+      }),
+    ).resolves.toBe(0);
+    expect(write).toHaveBeenCalledWith(
+      "/tmp/config.json",
+      expect.objectContaining({
+        version: 2,
+        profileMatch: "exact",
+        downloads: { directory: "~/Downloads" },
       }),
     );
   });
