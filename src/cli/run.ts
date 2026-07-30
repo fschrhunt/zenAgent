@@ -579,6 +579,29 @@ async function withDaemon<T>(
   }
 }
 
+async function reloadConfigAfterLocalWrite(
+  profileId: string,
+  dependencies: CliDependencies,
+): Promise<void> {
+  try {
+    await withDaemon(profileId, dependencies, (client) =>
+      client.request("config.reload", {}, `cli:config-reload:${randomUUID()}`),
+    );
+  } catch (error) {
+    // Speech assets can be installed before Zen starts. A later native host
+    // loads the new file at startup, while an already-running host is refreshed
+    // immediately above.
+    if (
+      error instanceof DaemonProtocolError &&
+      error.code === "browser-unavailable"
+    ) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
 async function runStatus(
   args: readonly string[],
   dependencies: CliDependencies,
@@ -1070,6 +1093,7 @@ async function runSpeech(
       speech: { installedLocales },
     });
     await dependencies.writeConfig(dependencies.configPath(), updated);
+    await reloadConfigAfterLocalWrite(existing.profile, dependencies);
     writeResult(
       "speech.install",
       result,
@@ -1309,6 +1333,7 @@ function wizardServices(dependencies: CliDependencies): SetupWizardServices {
           speech: { installedLocales },
         }),
       );
+      await reloadConfigAfterLocalWrite(existing.profile, dependencies);
       return { locale: result.locale };
     },
   };

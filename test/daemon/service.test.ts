@@ -599,6 +599,65 @@ describe("DaemonService", () => {
     await service.stop();
   });
 
+  it("revokes a granted waiter lease when media starts during acquisition", async () => {
+    const fixture = browserFixture();
+    const transport = fakeDaemonTransport(fixture.snapshot);
+    const service = new DaemonService({
+      transportFactory: () => transport,
+      reconcileIntervalMs: 0,
+    });
+    await service.start();
+    const owner = (await service.handle(
+      request(
+        "tabs.lease.acquire",
+        { tabId: fixture.tab.id },
+        "owner-acquire",
+        "owner",
+      ),
+    )) as { lease: { leaseId: string } };
+    const waiting = service.handle(
+      request(
+        "tabs.lease.acquire",
+        { tabId: fixture.tab.id, waitMs: 60_000 },
+        "waiting-acquire",
+        "waiter",
+      ),
+    );
+    await Promise.resolve();
+
+    transport.replaceSnapshot({
+      ...fixture.snapshot,
+      tabs: [{ ...fixture.tab, mediaState: known("playing") }],
+    });
+    await service.refresh();
+    await service.handle(
+      request(
+        "tabs.lease.release",
+        { leaseId: owner.lease.leaseId },
+        "owner-release",
+        "owner",
+      ),
+    );
+    await expect(waiting).rejects.toMatchObject({
+      code: "policy-rejection",
+      data: { reason: "playing-media" },
+    });
+
+    transport.replaceSnapshot(fixture.snapshot);
+    await service.refresh();
+    await expect(
+      service.handle(
+        request(
+          "tabs.lease.acquire",
+          { tabId: fixture.tab.id },
+          "next-acquire",
+          "next",
+        ),
+      ),
+    ).resolves.toMatchObject({ lease: { tabId: fixture.tab.id } });
+    await service.stop();
+  });
+
   it("cancels a bounded tab lease wait by operation ID", async () => {
     const fixture = browserFixture();
     const service = new DaemonService({

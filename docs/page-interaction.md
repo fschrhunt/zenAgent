@@ -103,6 +103,10 @@ context, selects a tab, focuses a Zen window, or switches the visible Space.
 This preserves the background-only design, but it also means the events are not
 trusted native user input. Websites that require trusted events or activation
 are unsupported; Zen Agent does not work around them by foregrounding the tab.
+Before dispatch, the actor inspects inline and registered JavaScript listeners
+along the complete event propagation path. A handler whose source is unavailable
+or may request a dialog, popup, protected permission, picker, fullscreen, or
+pointer lock is refused before page code runs.
 
 Back and forward are also explicit document-scoped mutations. A successful
 operation reports the generation on which it was attempted; navigation may
@@ -198,7 +202,7 @@ The proof covers top-level, same-origin, cross-origin, and open shadow-root
 content plus element replacement and navigation. Portable tests cover hostile
 result bounds, waits, cancellation, and multiple-client contention. ADR 0005 is
 **Accepted** for the named operations on Zen 1.21.9b / Gecko 153.0 / macOS 27
-arm64.
+(Darwin 27.0.0, aarch64-gcc3).
 
 ## Deliberately unsupported
 

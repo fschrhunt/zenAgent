@@ -208,6 +208,9 @@ export const statusResultSchema = z
       .object({
         browserVersion: z.string(),
         geckoVersion: z.string(),
+        operatingSystem: z.string(),
+        operatingSystemVersion: z.string(),
+        xpcomAbi: z.string(),
         extensionVersion: z.string(),
       })
       .strict()
@@ -756,6 +759,7 @@ export const pageDownloadInputSchema = z
       )
       .optional(),
     maxBytes: z.number().int().min(1).max(MAX_PAGE_RESOURCE_BYTES).optional(),
+    idempotencyKey: nonEmptyString.optional(),
   })
   .strict();
 

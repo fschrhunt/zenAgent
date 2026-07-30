@@ -10,16 +10,16 @@ version range.
 | --------- | --------------------------------------------------- |
 | Zen       | 1.21.9b                                             |
 | Gecko     | 153.0                                               |
-| macOS     | 27.0 arm64 headed proof environment                 |
+| macOS     | 27.0 (Darwin 27.0.0, aarch64-gcc3) headed proof     |
 | Node.js   | 24 or newer; headed proof recorded with Node 26.5.0 |
 | npm       | 11 or newer                                         |
 
 The base transport previously passed four consecutive headed runs. The expanded
 background-only suite then passed three consecutive runs on the exact tuple
-above, covering every browser capability listed below. An unlisted pair is
-refused before the first snapshot or mutation even when it reports familiar
-capabilities. Add a build only after `npm run spike:transport` passes three
-consecutive times on that exact pair.
+above, covering every browser capability listed below. An unlisted
+Zen/Gecko/OS/ABI tuple is refused before the first snapshot or mutation even
+when it reports familiar capabilities. Add a build only after
+`npm run spike:transport` passes three consecutive times on that exact tuple.
 
 Each browser capability is gated independently on the same exact tuple. The
 extension also probes the specific read-only primitive needed by each surface:

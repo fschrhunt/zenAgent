@@ -21,7 +21,7 @@ const MAX_RESOURCE_BYTES = 2 * 1024 * 1024;
 const MAX_MEDIA_RESOURCE_BYTES = 32 * 1024 * 1024;
 const MAX_MEDIA = 100;
 const MAX_CAPTION_CUES = 1_000;
-const UNSAFE_INLINE_HANDLER =
+const UNSAFE_HANDLER_SOURCE =
   /\b(?:window\s*\.\s*open|open\s*\(|alert\s*\(|confirm\s*\(|prompt\s*\(|requestPermission|getUserMedia|getDisplayMedia|geolocation\s*\.\s*(?:getCurrentPosition|watchPosition)|clipboard\s*\.\s*(?:read|readText|write|writeText)|showOpenFilePicker|showSaveFilePicker|showDirectoryPicker|credentials\s*\.\s*(?:create|get)|PaymentRequest|requestFullscreen|requestPointerLock)/iu;
 
 const INTERACTIVE_ROLES = new Set([
@@ -164,13 +164,93 @@ function assertStaticInteractionSafety(element, operation) {
   for (const name of element.getAttributeNames()) {
     const value = name.startsWith("on") ? element.getAttribute(name) : null;
 
-    if (value && UNSAFE_INLINE_HANDLER.test(value)) {
+    if (value && UNSAFE_HANDLER_SOURCE.test(value)) {
       throw Object.assign(
         new Error(
           `${operation} was refused because an inline handler may request foreground UI or a protected permission.`,
         ),
         { code: "policy-rejection" },
       );
+    }
+  }
+}
+
+function eventPropagationTargets(element) {
+  const targets = [];
+  let target = element;
+
+  while (target !== null) {
+    targets.push(target);
+    target = target.parentNode ?? target.host ?? null;
+  }
+
+  const document = element.ownerDocument;
+  if (!targets.includes(document)) {
+    targets.push(document);
+  }
+
+  const win = document?.defaultView;
+  if (win && !targets.includes(win)) {
+    targets.push(win);
+  }
+
+  return targets;
+}
+
+function refuseUnsafeHandler(operation, kind) {
+  throw Object.assign(
+    new Error(
+      `${operation} was refused because ${kind} may request foreground UI or a protected permission.`,
+    ),
+    { code: "policy-rejection" },
+  );
+}
+
+function assertEventInteractionSafety(element, operation, eventTypes) {
+  const types = new Set(eventTypes);
+
+  for (const target of eventPropagationTargets(element)) {
+    if (isElement(target)) {
+      for (const type of types) {
+        const value = target.getAttribute(`on${type}`);
+        if (value && UNSAFE_HANDLER_SOURCE.test(value)) {
+          refuseUnsafeHandler(operation, "an inline handler");
+        }
+      }
+    }
+
+    for (const listener of Services.els.getListenerInfoFor(target) ?? []) {
+      if (!types.has(listener.type)) {
+        continue;
+      }
+
+      let listenerObject;
+      try {
+        listenerObject = listener.listenerObject;
+      } catch {
+        refuseUnsafeHandler(operation, "a registered handler");
+      }
+
+      // Native listeners implement browser default actions rather than page
+      // script, and do not expose a JavaScript listener object.
+      if (listenerObject === null || listenerObject === undefined) {
+        continue;
+      }
+
+      let source;
+      try {
+        source = listener.toSource();
+      } catch {
+        refuseUnsafeHandler(operation, "a registered handler");
+      }
+
+      if (
+        typeof source !== "string" ||
+        source.length === 0 ||
+        UNSAFE_HANDLER_SOURCE.test(source)
+      ) {
+        refuseUnsafeHandler(operation, "a registered handler");
+      }
     }
   }
 }
@@ -1244,6 +1324,7 @@ export class ZenAgentPageChild extends JSWindowActorChild {
     switch (data.operation) {
       case "click":
         assertStaticInteractionSafety(element, "Click");
+        assertEventInteractionSafety(element, "Click", ["click", "submit"]);
         element.click();
         break;
       case "upload": {
@@ -1278,6 +1359,7 @@ export class ZenAgentPageChild extends JSWindowActorChild {
           );
         }
 
+        assertEventInteractionSafety(element, "Upload", ["input", "change"]);
         const win = ownerWindow(element);
         element.mozSetFileArray(data.files);
 
@@ -1301,6 +1383,11 @@ export class ZenAgentPageChild extends JSWindowActorChild {
         }
 
         const value = bounded(data.value);
+        assertEventInteractionSafety(
+          element,
+          data.operation === "fill" ? "Fill" : "Type",
+          data.operation === "fill" ? ["input", "change"] : ["input"],
+        );
 
         if (kind === "control") {
           const next =
@@ -1330,6 +1417,11 @@ export class ZenAgentPageChild extends JSWindowActorChild {
         break;
       }
       case "press": {
+        assertEventInteractionSafety(element, "Press", [
+          "keydown",
+          "keyup",
+          "submit",
+        ]);
         const win = ownerWindow(element);
         const options = {
           key: data.key,
@@ -1391,6 +1483,7 @@ export class ZenAgentPageChild extends JSWindowActorChild {
           );
         }
 
+        assertEventInteractionSafety(element, "Select", ["input", "change"]);
         for (const option of element.options) {
           option.selected = requested.has(option.value);
         }
@@ -1425,6 +1518,11 @@ export class ZenAgentPageChild extends JSWindowActorChild {
 
         if (element.checked !== checked) {
           assertStaticInteractionSafety(element, "Check");
+          assertEventInteractionSafety(element, "Check", [
+            "click",
+            "input",
+            "change",
+          ]);
           element.click();
         }
         break;
@@ -1442,6 +1540,7 @@ export class ZenAgentPageChild extends JSWindowActorChild {
 
         assertStaticInteractionSafety(form, "Submit");
         assertStaticInteractionSafety(element, "Submit");
+        assertEventInteractionSafety(element, "Submit", ["submit"]);
         form.requestSubmit(
           element.localName === "button" ||
             (element.localName === "input" &&

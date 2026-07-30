@@ -51,7 +51,9 @@ const MAX_MEDIA_RESOURCE_BYTES = 32 * 1024 * 1024;
 const MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 const MAX_SCREENSHOT_DIMENSION = 4_096;
 const MAX_SCREENSHOT_PIXELS = 16 * 1024 * 1024;
-const ACCEPTED_BACKGROUND_PAGE_BUILD_KEYS = new Set(["1.21.9b/153.0"]);
+const ACCEPTED_BACKGROUND_PAGE_BUILD_KEYS = new Set([
+  "1.21.9b/153.0/Darwin/27.0.0/aarch64-gcc3",
+]);
 let pageActorRegistered = false;
 let pageActorRegistrationError = null;
 let pageActorResourceRegistered = false;
@@ -277,7 +279,13 @@ function anyWindow() {
 }
 
 function currentBuildKey() {
-  return `${Services.appinfo.version}/${Services.appinfo.platformVersion}`;
+  return [
+    Services.appinfo.version,
+    Services.appinfo.platformVersion,
+    Services.appinfo.OS,
+    Services.sysinfo.getProperty("version"),
+    Services.appinfo.XPCOMABI,
+  ].join("/");
 }
 
 function hiddenDomWindow() {
@@ -472,6 +480,9 @@ function describe() {
     sessionId: sessionToken,
     browserVersion: Services.appinfo.version,
     geckoVersion: Services.appinfo.platformVersion,
+    operatingSystem: Services.appinfo.OS,
+    operatingSystemVersion: Services.sysinfo.getProperty("version"),
+    xpcomAbi: Services.appinfo.XPCOMABI,
     extensionVersion,
     capabilities: capabilities(),
     profileName: null,

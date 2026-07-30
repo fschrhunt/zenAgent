@@ -905,14 +905,14 @@ export function createZenAgentMcpServer(
         openWorldHint: true,
       },
     },
-    (params, extra) =>
+    ({ idempotencyKey, ...params }, extra) =>
       execute(
         async () =>
           pageDownloadResultSchema.parse(
             await daemon.request(
               "pages.resource.download",
               params,
-              mutationKey(undefined),
+              mutationKey(idempotencyKey),
               {
                 signal: extra.signal,
                 timeoutMs: PAGE_DOWNLOAD_TIMEOUT_MS,

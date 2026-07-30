@@ -133,6 +133,9 @@ export interface DaemonTransport {
     | Readonly<{
         browserVersion: string;
         geckoVersion: string;
+        operatingSystem: string;
+        operatingSystemVersion: string;
+        xpcomAbi: string;
         extensionVersion: string;
       }>
     | undefined;
@@ -218,6 +221,9 @@ export interface DaemonStatus {
   readonly compatibility: Readonly<{
     browserVersion: string;
     geckoVersion: string;
+    operatingSystem: string;
+    operatingSystemVersion: string;
+    xpcomAbi: string;
     extensionVersion: string;
   }> | null;
   readonly privateWindowPolicy: "hidden" | "explicit";
@@ -836,6 +842,7 @@ export class DaemonService {
         error instanceof DaemonProtocolError &&
         (error.code === "browser-unavailable" ||
           error.data?.["reason"] === "selected-tab" ||
+          error.data?.["reason"] === "playing-media" ||
           error.data?.["reason"] === "crashed" ||
           error.data?.["reason"] === "not-active")
       ) {

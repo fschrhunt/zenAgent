@@ -161,10 +161,21 @@ export async function launchScratchZen(
         exited,
         new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
       ]);
-      if (child.exitCode === null) child.kill("SIGKILL");
+      if (child.exitCode === null) {
+        child.kill("SIGKILL");
+        await Promise.race([
+          exited,
+          new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+        ]);
+      }
     }
     if (options.keepProfile !== true) {
-      rmSync(profileDir, { recursive: true, force: true });
+      rmSync(profileDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
     }
   };
 

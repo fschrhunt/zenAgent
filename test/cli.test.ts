@@ -115,6 +115,54 @@ describe("runCli", () => {
     ]);
   });
 
+  it("reloads daemon policy after the wizard installs speech assets", async () => {
+    const existing = {
+      version: 2,
+      profile: "profile",
+      profileMatch: "exact",
+      spaces: { personal: "space", aliases: {} },
+      routing: { rules: [] },
+      privateWindows: "hidden",
+      downloads: { directory: "~/Downloads" },
+      backgroundLaunch: { policy: "disabled" },
+      speech: { installedLocales: [] },
+    } satisfies ZenAgentConfig;
+    const writeConfig = vi.fn(() => Promise.resolve());
+    const harness = cliHarness(
+      ({ method }) => {
+        if (method === "config.reload") {
+          return { loaded: true, profileId: existing.profile };
+        }
+        throw new Error(`Unexpected daemon method ${method}`);
+      },
+      {
+        readConfig: () => Promise.resolve(existing),
+        writeConfig,
+        installSpeechLocale: () => ({ locale: "en-US", installed: true }),
+      },
+    );
+    const startSetupWizard = vi.fn(async (services: SetupWizardServices) => {
+      await expect(services.installSpeechLocale?.("en-US")).resolves.toEqual({
+        locale: "en-US",
+      });
+    });
+
+    await expect(
+      runCli([], {
+        ...harness.dependencies,
+        isInteractive: () => true,
+        startSetupWizard,
+      }),
+    ).resolves.toBe(CLI_EXIT_CODES.success);
+    expect(writeConfig).toHaveBeenCalledWith(
+      "/tmp/zen-agent-test-config.json",
+      expect.objectContaining({ speech: { installedLocales: ["en-US"] } }),
+    );
+    expect(harness.calls.map(({ method }) => method)).toEqual([
+      "config.reload",
+    ]);
+  });
+
   it("prints help instead of prompting when invoked without a TTY", async () => {
     const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
     const startSetupWizard = vi.fn(() => Promise.resolve());
@@ -268,6 +316,9 @@ describe("runCli", () => {
       compatibility: {
         browserVersion: "1.21.9b",
         geckoVersion: "153.0",
+        operatingSystem: "Darwin",
+        operatingSystemVersion: "27.0.0",
+        xpcomAbi: "aarch64-gcc3",
         extensionVersion: "0.1.0",
       },
       counts: { spaces: 2, tabs: 4 },
@@ -418,14 +469,26 @@ describe("runCli", () => {
       spaces: { personal: "space", aliases: {} },
       routing: { rules: [] },
     } satisfies ZenAgentConfig;
-
-    await expect(
-      runCli(["speech", "install", "--locale", "en-US", "--json"], {
+    const harness = cliHarness(
+      ({ method }) => {
+        if (method === "config.reload") {
+          return { loaded: true, profileId: existing.profile };
+        }
+        throw new Error(`Unexpected daemon method ${method}`);
+      },
+      {
         configPath: () => "/tmp/config.json",
         readConfig: () => Promise.resolve(existing),
         writeConfig: write,
         installSpeechLocale: () => ({ locale: "en-US", installed: true }),
-      }),
+      },
+    );
+
+    await expect(
+      runCli(
+        ["speech", "install", "--locale", "en-US", "--json"],
+        harness.dependencies,
+      ),
     ).resolves.toBe(0);
 
     expect(write).toHaveBeenCalledWith(
@@ -437,7 +500,44 @@ describe("runCli", () => {
         backgroundLaunch: { policy: "disabled" },
       }),
     );
+    expect(harness.calls.map(({ method }) => method)).toEqual([
+      "config.reload",
+    ]);
     expect(stdout).toHaveBeenCalled();
+  });
+
+  it("keeps offline speech installation available before Zen starts", async () => {
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const existing = {
+      version: 2,
+      profile: "profile",
+      profileMatch: "exact",
+      spaces: { personal: "space", aliases: {} },
+      routing: { rules: [] },
+      privateWindows: "hidden",
+      downloads: { directory: "~/Downloads" },
+      backgroundLaunch: { policy: "disabled" },
+      speech: { installedLocales: [] },
+    } satisfies ZenAgentConfig;
+    const close = vi.fn();
+
+    await expect(
+      runCli(["speech", "install", "--locale", "en-US"], {
+        configPath: () => "/tmp/config.json",
+        readConfig: () => Promise.resolve(existing),
+        writeConfig: () => Promise.resolve(),
+        installSpeechLocale: () => ({ locale: "en-US", installed: true }),
+        createDaemonClient: () => ({
+          connect: () =>
+            Promise.reject(
+              Object.assign(new Error("missing socket"), { code: "ENOENT" }),
+            ),
+          request: () => Promise.reject(new Error("unreachable")),
+          close,
+        }),
+      }),
+    ).resolves.toBe(CLI_EXIT_CODES.success);
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("transcribes prerecorded audio without daemon access", async () => {

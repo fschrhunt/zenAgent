@@ -124,6 +124,9 @@ export interface PageInspection {
 export interface TransportCompatibilityDescriptor {
   readonly browserVersion: string;
   readonly geckoVersion: string;
+  readonly operatingSystem: string;
+  readonly operatingSystemVersion: string;
+  readonly xpcomAbi: string;
   readonly extensionVersion: string;
 }
 
@@ -220,6 +223,9 @@ export class ZenTransport {
       capabilities?: unknown;
       browserVersion?: unknown;
       geckoVersion?: unknown;
+      operatingSystem?: unknown;
+      operatingSystemVersion?: unknown;
+      xpcomAbi?: unknown;
       extensionVersion?: unknown;
     };
     const browserVersion =
@@ -230,6 +236,18 @@ export class ZenTransport {
       typeof description.geckoVersion === "string"
         ? description.geckoVersion
         : "unreported";
+    const operatingSystem =
+      typeof description.operatingSystem === "string"
+        ? description.operatingSystem
+        : "unreported";
+    const operatingSystemVersion =
+      typeof description.operatingSystemVersion === "string"
+        ? description.operatingSystemVersion
+        : "unreported";
+    const xpcomAbi =
+      typeof description.xpcomAbi === "string"
+        ? description.xpcomAbi
+        : "unreported";
     const extensionVersion =
       typeof description.extensionVersion === "string" &&
       description.extensionVersion.length > 0 &&
@@ -237,15 +255,21 @@ export class ZenTransport {
         ? description.extensionVersion
         : "unreported";
 
-    assertSupportedZenBuild({ browserVersion, geckoVersion });
-    this.#compatibility = {
+    const build = {
       browserVersion,
       geckoVersion,
+      operatingSystem,
+      operatingSystemVersion,
+      xpcomAbi,
+    };
+    assertSupportedZenBuild(build);
+    this.#compatibility = {
+      ...build,
       extensionVersion,
     };
     this.#capabilities = acceptedCapabilities(
       Array.isArray(description.capabilities) ? description.capabilities : [],
-      { browserVersion, geckoVersion },
+      build,
     );
     assertRequiredCapabilities(this.#capabilities, browserVersion);
     this.#connectedAt = this.#now();

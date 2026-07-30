@@ -426,6 +426,7 @@ async function main() {
   }
   const foregroundUiLocators = [
     ["dialogAttemptRefused", "Dialog button"],
+    ["registeredDialogAttemptRefused", "Registered dialog button"],
     ["notificationPermissionRefused", "Notification permission button"],
     ["geolocationPermissionRefused", "Geolocation permission button"],
     ["microphonePermissionRefused", "Microphone permission button"],
@@ -449,11 +450,22 @@ async function main() {
       claims[name] = error?.code === "policy-rejection";
     }
   }
+  const unsafeInput = await uniquePageNode(transport, pageTarget, {
+    kind: "label",
+    label: "Unsafe input",
+  });
+  try {
+    await transport.fillPage(elementTarget(unsafeInput), "blocked");
+    claims.inlineInputAttemptRefused = false;
+  } catch (error) {
+    claims.inlineInputAttemptRefused = error?.code === "policy-rejection";
+  }
   const uiInspection = await transport.inspectPage(routedId, {
     maxChars: 4000,
   });
   claims.permissionAndForegroundUiAttemptsRefused =
-    foregroundUiLocators.every(([name]) => claims[name] === true);
+    foregroundUiLocators.every(([name]) => claims[name] === true) &&
+    claims.inlineInputAttemptRefused === true;
   claims.refusedUiHandlersNeverRan =
     uiInspection.visibleText.includes("ui-attempts:0");
   const inventoryAfterUiRefusals = await transport.snapshot();
@@ -1297,6 +1309,15 @@ function startFixtureServer(
 <button type="button" onclick="recordUiAttempt(); alert('blocked')">
   Dialog button
 </button>
+<button id="registered-dialog" type="button">Registered dialog button</button>
+<label>
+  Unsafe input
+  <input
+    id="unsafe-input"
+    autocomplete="off"
+    oninput="recordUiAttempt(); alert('blocked')"
+  >
+</label>
 <button
   type="button"
   onclick="recordUiAttempt(); Notification.requestPermission()"
@@ -1375,6 +1396,10 @@ function startFixtureServer(
   const count = document.getElementById("count");
   document.getElementById("increment").addEventListener("click", () => {
     count.value = String(Number(count.value) + 1);
+  });
+  document.getElementById("registered-dialog").addEventListener("click", () => {
+    recordUiAttempt();
+    alert("blocked");
   });
   document.getElementById("signup").addEventListener("submit", (event) => {
     event.preventDefault();

@@ -25,12 +25,18 @@ export const SUPPORTED_ZEN_BUILDS = [
   {
     browserVersion: "1.21.9b",
     geckoVersion: "153.0",
+    operatingSystem: "Darwin",
+    operatingSystemVersion: "27.0.0",
+    xpcomAbi: "aarch64-gcc3",
   },
 ] as const;
 
 export interface ZenBuildVersion {
   readonly browserVersion: string;
   readonly geckoVersion: string;
+  readonly operatingSystem: string;
+  readonly operatingSystemVersion: string;
+  readonly xpcomAbi: string;
 }
 
 export const TRANSPORT_CAPABILITIES = [
@@ -165,7 +171,10 @@ export function isCapabilityAcceptedOnBuild(
   return ACCEPTED_CAPABILITY_BUILDS[capability].some(
     (accepted) =>
       accepted.browserVersion === build.browserVersion &&
-      accepted.geckoVersion === build.geckoVersion,
+      accepted.geckoVersion === build.geckoVersion &&
+      accepted.operatingSystem === build.operatingSystem &&
+      accepted.operatingSystemVersion === build.operatingSystemVersion &&
+      accepted.xpcomAbi === build.xpcomAbi,
   );
 }
 
@@ -196,7 +205,10 @@ export function isSupportedZenBuild(build: ZenBuildVersion): boolean {
   return SUPPORTED_ZEN_BUILDS.some(
     (supported) =>
       supported.browserVersion === build.browserVersion &&
-      supported.geckoVersion === build.geckoVersion,
+      supported.geckoVersion === build.geckoVersion &&
+      supported.operatingSystem === build.operatingSystem &&
+      supported.operatingSystemVersion === build.operatingSystemVersion &&
+      supported.xpcomAbi === build.xpcomAbi,
   );
 }
 
@@ -214,12 +226,12 @@ export function assertSupportedZenBuild(build: ZenBuildVersion): void {
 
   const supported = SUPPORTED_ZEN_BUILDS.map(
     (candidate) =>
-      `Zen ${candidate.browserVersion} / Gecko ${candidate.geckoVersion}`,
+      `Zen ${candidate.browserVersion} / Gecko ${candidate.geckoVersion} / ${candidate.operatingSystem} ${candidate.operatingSystemVersion} / ${candidate.xpcomAbi}`,
   ).join(", ");
 
   throw new TransportProtocolError(
     "unsupported-capability",
-    `Zen ${build.browserVersion} / Gecko ${build.geckoVersion} has not passed Zen Agent's headed safety proof, so Zen Agent will not operate on it. Supported builds: ${supported}.`,
+    `Zen ${build.browserVersion} / Gecko ${build.geckoVersion} / ${build.operatingSystem} ${build.operatingSystemVersion} / ${build.xpcomAbi} has not passed Zen Agent's headed safety proof, so Zen Agent will not operate on it. Supported builds: ${supported}.`,
   );
 }
 

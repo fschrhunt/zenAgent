@@ -238,6 +238,9 @@ describe("ZenTransport", () => {
     expect(transport.compatibility).toEqual({
       browserVersion: "1.21.9b",
       geckoVersion: "153.0",
+      operatingSystem: "Darwin",
+      operatingSystemVersion: "27.0.0",
+      xpcomAbi: "aarch64-gcc3",
       extensionVersion: "0.1.0",
     });
   });

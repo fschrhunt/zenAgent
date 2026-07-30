@@ -1,6 +1,6 @@
 # Zen Agent TODO
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 This is the dependency-ordered implementation checklist for Zen Agent. Check an
 item only after its acceptance criteria are verified. Product work is tracked in
@@ -233,9 +233,9 @@ by a real browser instead of fixtures.
       names the Zen version. The probe itself still needs a headed run.
 - [x] Record the Zen versions the capability probe has actually passed on, and
       fail closed on versions it has not. The host now accepts exactly Zen
-      1.21.9b / Gecko 153.0, the pair that passed all eight capabilities and the
-      complete headed proof four times. Unknown pairs are refused before the
-      first snapshot or mutation.
+      1.21.9b / Gecko 153.0 / Darwin 27.0.0 / aarch64-gcc3, the tuple that
+      passed all eight capabilities and the complete headed proof four times.
+      Unknown tuples are refused before the first snapshot or mutation.
 - [x] Keep an MV3 background event page holding one native messaging port open,
       since that is the only supported way to keep it alive. **Proven.** Zen
       loads a single MV3 add-on that also declares `experiment_apis` — the
@@ -447,7 +447,9 @@ Tab management alone is not enough for agents to complete browser tasks.
 - [x] Implement click without activating the tab.
 - [x] Implement fill and type without activating the tab.
 - [x] Implement keyboard press without sending input to the user's active tab.
-- [x] Implement select, check, uncheck, and form submission.
+- [x] Implement select, check, uncheck, and form submission. Inline and
+      registered handlers on each dispatched event path are inspected before
+      page code runs; foreground-UI or protected-permission sources fail closed.
 - [x] Implement wait for load state, URL, text, element, and bounded timeout.
 - [x] Implement back, forward, reload, and explicit navigation.
 - [x] Handle same-origin and cross-origin frames with explicit frame identity.

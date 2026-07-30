@@ -47,8 +47,8 @@ Zen Agent supports only browser builds in
 intentional even if the browser appears close enough.
 
 Do not bypass the gate or add a semantic-version wildcard. Run the complete
-headed proof on the exact Zen/Gecko pair and add it to `SUPPORTED_ZEN_BUILDS`
-only when every invariant passes.
+headed proof on the exact Zen/Gecko/OS/ABI tuple and add it to
+`SUPPORTED_ZEN_BUILDS` only when every invariant passes.
 
 This code can also mean a build lacks a required Zen internal. Capability
 probing fails closed rather than attempting an operation that might switch a

@@ -85,6 +85,9 @@ class FakeDaemonClient implements McpDaemonClient {
           compatibility: {
             browserVersion: "1.21.9b",
             geckoVersion: "153.0",
+            operatingSystem: "Darwin",
+            operatingSystemVersion: "27.0.0",
+            xpcomAbi: "aarch64-gcc3",
             extensionVersion: "0.1.0",
           },
           privateWindowPolicy: "hidden",
@@ -781,6 +784,7 @@ describe("Zen Agent MCP server", () => {
           target: frameTarget,
           url: "https://example.com/example.pdf",
           fileName: "example.pdf",
+          idempotencyKey: "page-download-test",
         },
       ],
       [
@@ -932,9 +936,15 @@ describe("Zen Agent MCP server", () => {
         ?.idempotencyKey,
     ).toMatch(/^mcp:/u);
     expect(
-      daemon.calls.find(({ method }) => method === "pages.resource.download")
-        ?.idempotencyKey,
-    ).toMatch(/^mcp:/u);
+      daemon.calls.find(({ method }) => method === "pages.resource.download"),
+    ).toMatchObject({
+      params: {
+        target: frameTarget,
+        url: "https://example.com/example.pdf",
+        fileName: "example.pdf",
+      },
+      idempotencyKey: "page-download-test",
+    });
   });
 
   it("rejects malformed tool input before calling the daemon", async () => {

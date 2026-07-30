@@ -11,6 +11,9 @@ const parentSource = readFileSync(
 interface ProbeOptions {
   readonly browserVersion?: string;
   readonly geckoVersion?: string;
+  readonly operatingSystem?: string;
+  readonly operatingSystemVersion?: string;
+  readonly xpcomAbi?: string;
   readonly drawSnapshot?: boolean;
   readonly upload?: boolean;
   readonly streamingFetch?: boolean;
@@ -128,11 +131,21 @@ capabilities();`,
         appinfo: {
           version: options.browserVersion ?? "1.21.9b",
           platformVersion: options.geckoVersion ?? "153.0",
+          OS: options.operatingSystem ?? "Darwin",
+          XPCOMABI: options.xpcomAbi ?? "aarch64-gcc3",
         },
         focus: {},
         io: {
           getProtocolHandler() {
             return resourceProtocol;
+          },
+        },
+        sysinfo: {
+          getProperty(name: string) {
+            if (name === "version") {
+              return options.operatingSystemVersion ?? "27.0.0";
+            }
+            throw new Error(`Unexpected system property ${name}`);
           },
         },
         uuid: {
@@ -179,6 +192,19 @@ describe("extension capability reporting", () => {
   it("does not advertise page capabilities on an unaccepted build", () => {
     expect(
       reportedCapabilities({ geckoVersion: "154.0" }).filter((capability) =>
+        capability.startsWith("browser.pages."),
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not advertise page capabilities outside the headed OS tuple", () => {
+    expect(
+      reportedCapabilities({ operatingSystemVersion: "26.0.0" }).filter(
+        (capability) => capability.startsWith("browser.pages."),
+      ),
+    ).toEqual([]);
+    expect(
+      reportedCapabilities({ xpcomAbi: "x86_64-gcc3" }).filter((capability) =>
         capability.startsWith("browser.pages."),
       ),
     ).toEqual([]);
