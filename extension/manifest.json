@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Zen Agent",
   "version": "0.1.0",
-  "description": "Lets Zen Agent discover and route tabs across Zen Spaces from the terminal, without focusing a window, selecting a tab, or switching the visible Space.",
+  "description": "Lets Zen Agent find and open tabs across your Zen Spaces for your agents, without stealing focus, switching your Space, or changing the tab you are on.",
   "browser_specific_settings": {
     "gecko": {
       "id": "zen-agent@zen-agent.local",

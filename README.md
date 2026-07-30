@@ -5,11 +5,11 @@
 <br />
 <br />
 
-**A considerate, space-aware MCP server for background automation in
-[Zen Browser](https://zen-browser.app/), with a guided setup wizard.**
+**Make Agent Browsing Chill.**
 
-Built for terminal-native agents that need to use the browser without taking
-over the window you are actively working in.
+Zen Agent lets your agents use [Zen Browser](https://zen-browser.app/) quietly
+in the background, so the window you are working in stays exactly where you left
+it. A guided wizard walks you through setup.
 
 </div>
 
@@ -50,10 +50,9 @@ artifact.
 
 Agents that drive a browser usually steal it. They raise a window, jump you to a
 different Space, and pull focus mid-sentence. Zen Agent does the opposite: it
-looks before it opens, reuses what is already there, and stays in the
-background.
+looks before it opens, reuses what is already there, and stays out of your way.
 
-## Principles
+## How it behaves
 
 |                 |                                                                                 |
 | --------------- | ------------------------------------------------------------------------------- |
@@ -66,24 +65,24 @@ background.
 
 ## Status
 
-**Prototype, with the background transport proven on one exact browser build.**
-The browser model, native-host daemon, configuration and routing policy, tab
-resolver, setup CLI, and stdio MCP adapter are implemented and covered by
-portable tests. The headed proof can enumerate tabs in non-visible Spaces and
-open, move, navigate, reload, and close explicitly identified background tabs
-without changing the selected tab, taking focus, or interrupting existing
-playback. A dedicated packaged actor can also return bounded URL, title, load
-state, and visible text from an explicitly identified loaded HTTP(S) tab in a
-non-visible Space.
+**Early days: a working prototype, with the background transport proven on one
+exact browser build.**
 
-The headed result currently applies only to **Zen 1.21.9b / Gecko 153.0 on macOS
-27 arm64**. Other browser builds fail closed. Read-only `pages.inspect` exists
-through the daemon, but the MCP adapter does not expose it yet. Semantic
-snapshots and element interaction are still unimplemented. There is not yet a
-release-quality extension package, so this repository should still be treated as
-a source prototype rather than an end-user release. See
-[compatibility](docs/compatibility.md) and the
-[transport evidence](docs/transport.md#proven).
+Working today: the browser model, native-host daemon, configuration and routing
+policy, tab resolver, setup wizard, and stdio MCP adapter, all covered by tests
+that need no browser. Against a real browser, Zen Agent can list tabs in Spaces
+you cannot currently see, and open, move, navigate, reload, and close specific
+background tabs without changing your selected tab, taking focus, or
+interrupting playback. It can also read back the URL, title, load state, and
+visible text of a loaded HTTP(S) tab.
+
+Not there yet: that browser proof so far covers only **Zen 1.21.9b / Gecko 153.0
+on macOS 27 arm64** — other builds fail closed instead of guessing. Read-only
+`pages.inspect` works through the daemon but is not exposed over MCP, and
+semantic snapshots and element interaction are unimplemented. There is no
+release-quality extension package yet, so treat this as a source prototype
+rather than a finished install. See [compatibility](docs/compatibility.md) and
+the [transport evidence](docs/transport.md#proven).
 
 ## Development
 
