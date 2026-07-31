@@ -1,6 +1,6 @@
 # Configuration and Space routing
 
-Zen Agent configuration schema version 1 is JSON. On macOS, the default path is:
+Zen Agent configuration schema version 2 is JSON. On macOS, the default path is:
 
 ```text
 ~/Library/Application Support/zen-agent/config.json
@@ -56,8 +56,19 @@ not intend to configure and retry. After configuration exists, its explicit
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "profile": "tddguwg7.Default (release)",
+  "profileMatch": "exact",
+  "privateWindows": "hidden",
+  "downloads": {
+    "directory": "~/Downloads"
+  },
+  "backgroundLaunch": {
+    "policy": "disabled"
+  },
+  "speech": {
+    "installedLocales": []
+  },
   "spaces": {
     "personal": "9f77971d-6f59-4470-9d73-fec34a917c5c",
     "work": "ac541418-c462-4366-af1b-980577f61ff5",
@@ -90,7 +101,35 @@ not intend to configure and retry. After configuration exists, its explicit
 
 `profile` is the leaf name of Zen's profile directory as reported by the
 privileged extension. It is never inferred from the focused or most recently
-used browser window.
+used browser window. `profileMatch` must be `exact`.
+
+Private windows are hidden by default, including windows whose private state
+cannot be verified. `"privateWindows": "explicit"` is an affirmative opt-in to
+the browser model's explicit policy, but the current compatibility matrix has
+not accepted that capability. A daemon configured for explicit private access
+must fail closed until the separate private-window headed proof is recorded; it
+must not silently expose private windows.
+
+Downloads default to `~/Downloads`. Background launch must remain
+`{"policy":"disabled"}` until that operation passes its own headed proof.
+`speech.installedLocales` records canonical BCP-47 locales whose on-device model
+assets were installed through explicit setup.
+
+## Migrating schema version 1
+
+Version 1 files load with conservative defaults and can be atomically rewritten
+as strict version 2:
+
+```sh
+zen-agent config migrate
+```
+
+Migration pins exact profile matching, hides private windows, uses
+`~/Downloads`, disables background launch, and starts with no configured speech
+locales. Use `--config <path>` for an alternate file.
+
+Back up the file before changing package versions. The all-component upgrade and
+rollback sequence is documented in [Upgrade and rollback](upgrading.md).
 
 `personal` and `work` map to stable Zen Space IDs. Named aliases do the same for
 any other Space. Aliases start with a lowercase letter and contain only

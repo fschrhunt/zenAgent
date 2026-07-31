@@ -34,8 +34,11 @@
     }
   },
   "files": [
+    "CHANGELOG.md",
     "dist",
-    "extension"
+    "extension",
+    "native",
+    "scripts/build-speech-helper.mjs"
   ],
   "bundleDependencies": [
     "@clack/core",
@@ -47,8 +50,8 @@
     "npm": ">=11"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build && npm run package:check && npm run release:check",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-speech-helper.mjs",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run version:check && npm run safety:background && npm run test:coverage && npm run build && npm run package:check && npm run release:check",
     "dev": "tsx src/cli.ts",
     "extension:pack": "node scripts/package-extension.mjs",
     "format": "prettier --write .",
@@ -58,14 +61,19 @@
     "package:check": "node scripts/check-package.mjs",
     "prepack": "npm run build",
     "release:check": "node scripts/check-release-artifacts.mjs",
+    "safety:background": "node scripts/check-background-safety.mjs",
+    "speech:build": "node scripts/build-speech-helper.mjs --required",
     "spike:transport": "ZEN_SPIKE=1 vitest run test/integration",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "version:check": "node scripts/check-version.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.1.2",
+    "@vitest/coverage-v8": "4.1.10",
     "eslint": "^10.8.0",
     "globals": "^17.8.0",
     "prettier": "^3.9.6",

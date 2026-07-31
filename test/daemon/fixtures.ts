@@ -8,6 +8,7 @@ import type {
   DaemonTransport,
   DaemonTransportFactory,
 } from "../../src/daemon/service.js";
+import { PAGE_SCHEMA_VERSION } from "../../src/page/model.js";
 import type {
   ZenTransportEvent,
   ZenTransportListener,
@@ -64,6 +65,16 @@ export function fakeDaemonTransport(
       "zen.tabs.open-background",
       "browser.windows.private",
       "browser.pages.inspect",
+      "browser.pages.snapshot",
+      "browser.pages.query",
+      "browser.pages.click",
+      "browser.pages.fill",
+      "browser.pages.type",
+      "browser.pages.press",
+      "browser.pages.select",
+      "browser.pages.check",
+      "browser.pages.submit",
+      "browser.pages.history",
     ] satisfies readonly TransportCapability[],
     get sessionId() {
       return current.sessions[0]?.id;
@@ -132,6 +143,113 @@ export function fakeDaemonTransport(
         visibleText: "Visible fixture text",
         truncated: false,
         visitedTextNodes: 1,
+      });
+    },
+    snapshotPage(tabId, options) {
+      calls.push(`page-snapshot:${tabId}:${String(options?.maxNodes ?? "")}`);
+      return Promise.resolve({
+        schemaVersion: PAGE_SCHEMA_VERSION,
+        snapshotId: "snapshot-1",
+        documentId: "document-1",
+        tabId,
+        capturedAt: "2026-07-29T00:00:00.000Z",
+        url: "https://example.com/",
+        title: "Example",
+        loadState: "complete",
+        rootFrameRef: "frame-1",
+        frames: [
+          {
+            frameRef: "frame-1",
+            parentFrameRef: null,
+            documentId: "document-1",
+            url: "https://example.com/",
+            loadState: "complete",
+            availability: "available",
+          },
+        ],
+        nodes: [],
+        truncation: {
+          frames: false,
+          nodes: false,
+          strings: false,
+          totalBytes: false,
+        },
+      });
+    },
+    queryPage(target, options) {
+      calls.push(
+        `page-query:${target.tabId}:${target.snapshotId}:${options.locator.kind}`,
+      );
+      return Promise.resolve({ nodes: [], truncated: false });
+    },
+    clickPage(target) {
+      calls.push(`page-click:${target.tabId}:${target.elementRef}`);
+      return Promise.resolve({
+        performed: true,
+        documentId: target.documentId,
+      });
+    },
+    fillPage(target) {
+      calls.push(`page-fill:${target.tabId}:${target.elementRef}`);
+      return Promise.resolve({
+        performed: true,
+        documentId: target.documentId,
+      });
+    },
+    typePage(target) {
+      calls.push(`page-type:${target.tabId}:${target.elementRef}`);
+      return Promise.resolve({
+        performed: true,
+        documentId: target.documentId,
+      });
+    },
+    pressPage(target) {
+      calls.push(`page-press:${target.tabId}:${target.elementRef}`);
+      return Promise.resolve({
+        performed: true,
+        documentId: target.documentId,
+      });
+    },
+    selectPage(target) {
+      calls.push(`page-select:${target.tabId}:${target.elementRef}`);
+      return Promise.resolve({
+        performed: true,
+        documentId: target.documentId,
+      });
+    },
+    checkPage(target) {
+      calls.push(`page-check:${target.tabId}:${target.elementRef}`);
+      return Promise.resolve({
+        performed: true,
+        documentId: target.documentId,
+      });
+    },
+    uncheckPage(target) {
+      calls.push(`page-uncheck:${target.tabId}:${target.elementRef}`);
+      return Promise.resolve({
+        performed: true,
+        documentId: target.documentId,
+      });
+    },
+    submitPage(target) {
+      calls.push(`page-submit:${target.tabId}:${target.elementRef}`);
+      return Promise.resolve({
+        performed: true,
+        documentId: target.documentId,
+      });
+    },
+    backPage(target) {
+      calls.push(`page-back:${target.tabId}:${target.documentId}`);
+      return Promise.resolve({
+        performed: true,
+        documentId: target.documentId,
+      });
+    },
+    forwardPage(target) {
+      calls.push(`page-forward:${target.tabId}:${target.documentId}`);
+      return Promise.resolve({
+        performed: true,
+        documentId: target.documentId,
       });
     },
     async reloadTab(tabId) {

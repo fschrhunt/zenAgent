@@ -103,6 +103,7 @@ function fakeExtension(handlers: Record<string, Handler>): FakeExtension {
 function describeResult(capabilities: readonly string[]): unknown {
   return {
     ...snapshotPayload().session,
+    extensionVersion: "0.1.0",
     capabilities,
   };
 }
@@ -126,6 +127,84 @@ function connectedTransport(handlers: Record<string, Handler> = {}): {
   transport.on((received) => events.push(received));
 
   return { transport, extension, events };
+}
+
+const pageTarget = {
+  tabId: "tab-1",
+  documentId: "document-1",
+  snapshotId: "snapshot-1",
+  frameRef: "frame-1",
+  elementRef: "element-1",
+} as const;
+
+function semanticNode(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    elementRef: "element-1",
+    frameRef: "frame-1",
+    parentElementRef: null,
+    role: "button",
+    name: "Save",
+    visibleText: "Save",
+    visible: true,
+    geometry: {
+      x: 10,
+      y: 20,
+      width: 100,
+      height: 30,
+      viewportX: 10,
+      viewportY: 20,
+      viewportWidth: 100,
+      viewportHeight: 30,
+    },
+    shadowRoot: "none",
+    state: {
+      disabled: false,
+      editable: false,
+      checked: null,
+      selected: null,
+      expanded: null,
+      pressed: null,
+      required: false,
+      readonly: false,
+      invalid: false,
+      level: null,
+      orientation: null,
+    },
+    actionHints: ["click", "press"],
+    ...overrides,
+  };
+}
+
+function pageSnapshotResult(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    schemaVersion: 1,
+    snapshotId: "snapshot-1",
+    documentId: "document-1",
+    tabId: "tab-1",
+    capturedAt: "2026-07-29T00:00:00.000Z",
+    url: "https://example.com/",
+    title: "Example",
+    loadState: "complete",
+    rootFrameRef: "frame-1",
+    frames: [
+      {
+        frameRef: "frame-1",
+        parentFrameRef: null,
+        documentId: "document-1",
+        url: "https://example.com/",
+        loadState: "complete",
+        availability: "available",
+      },
+    ],
+    nodes: [semanticNode()],
+    truncation: {
+      frames: false,
+      nodes: false,
+      strings: false,
+      totalBytes: false,
+    },
+    ...overrides,
+  };
 }
 
 describe("ZenTransport", () => {
@@ -156,6 +235,14 @@ describe("ZenTransport", () => {
     ]);
     expect(snapshot.tabs).toHaveLength(1);
     expect(transport.capabilities).toContain("zen.tabs.enumerate-all-spaces");
+    expect(transport.compatibility).toEqual({
+      browserVersion: "1.21.9b",
+      geckoVersion: "153.0",
+      operatingSystem: "Darwin",
+      operatingSystemVersion: "27.0.0",
+      xpcomAbi: "aarch64-gcc3",
+      extensionVersion: "0.1.0",
+    });
   });
 
   it("refuses to operate on a build missing a required capability", async () => {
@@ -429,6 +516,307 @@ describe("ZenTransport", () => {
     await expect(
       transport.inspectPage("tab-1", { maxChars: 10_001 }),
     ).rejects.toThrow(/1 through 10000/);
+  });
+
+  it("captures and validates a bounded semantic page snapshot", async () => {
+    let requested: unknown;
+    const { transport } = connectedTransport({
+      "pages.snapshot": (params) => {
+        requested = params;
+        return pageSnapshotResult({
+          nodes: [
+            semanticNode({
+              actionHints: ["open-background", "press"],
+              backgroundUrl: "https://example.com/new",
+            }),
+          ],
+        });
+      },
+    });
+    await transport.connect();
+
+    const page = await transport.snapshotPage("tab-1", { maxNodes: 50 });
+
+    expect(requested).toEqual({ tabId: "tab-1", maxNodes: 50 });
+    expect(page.rootFrameRef).toBe("frame-1");
+    expect(page.nodes[0]).toMatchObject({
+      role: "button",
+      name: "Save",
+      actionHints: ["open-background", "press"],
+      backgroundUrl: "https://example.com/new",
+    });
+  });
+
+  it("rejects snapshots that exceed the requested semantic-node bound", async () => {
+    const { transport } = connectedTransport({
+      "pages.snapshot": () =>
+        pageSnapshotResult({
+          nodes: [semanticNode(), semanticNode({ elementRef: "element-2" })],
+        }),
+    });
+    await transport.connect();
+
+    await expect(
+      transport.snapshotPage("tab-1", { maxNodes: 1 }),
+    ).rejects.toThrow(/invalid or unbounded page snapshot/);
+    await expect(
+      transport.snapshotPage("tab-1", { maxNodes: 5_001 }),
+    ).rejects.toThrow(/1 through 5000/);
+  });
+
+  it("queries a live snapshot frame and validates returned frame identity", async () => {
+    let requested: unknown;
+    const { transport } = connectedTransport({
+      "pages.query": (params) => {
+        requested = params;
+        return { nodes: [semanticNode()], truncated: false };
+      },
+    });
+    await transport.connect();
+
+    const result = await transport.queryPage(pageTarget, {
+      locator: { kind: "role", role: "button", name: "Save" },
+      maxResults: 5,
+    });
+
+    expect(requested).toEqual({
+      target: {
+        tabId: "tab-1",
+        documentId: "document-1",
+        snapshotId: "snapshot-1",
+        frameRef: "frame-1",
+      },
+      locator: { kind: "role", role: "button", name: "Save" },
+      maxResults: 5,
+    });
+    expect(result.nodes).toHaveLength(1);
+  });
+
+  it("refuses unbounded locators before page content is queried", async () => {
+    const { transport, extension } = connectedTransport({
+      "pages.query": () => ({ nodes: [], truncated: false }),
+    });
+    await transport.connect();
+    const before = [...extension.methodsCalled];
+
+    await expect(
+      transport.queryPage(pageTarget, {
+        locator: { kind: "text", text: "x".repeat(65_537) },
+      }),
+    ).rejects.toThrow(/locator text/);
+    expect(extension.methodsCalled).toEqual(before);
+  });
+
+  it("sends every targeted page mutation with complete reference scope", async () => {
+    const calls: unknown[] = [];
+    const mutation = (params: unknown): unknown => {
+      calls.push(params);
+      return { performed: true, documentId: "document-1" };
+    };
+    const { transport, extension } = connectedTransport({
+      "pages.click": mutation,
+      "pages.fill": mutation,
+      "pages.type": mutation,
+      "pages.press": mutation,
+      "pages.select": mutation,
+      "pages.check": mutation,
+      "pages.uncheck": mutation,
+      "pages.submit": mutation,
+      "pages.back": mutation,
+      "pages.forward": mutation,
+    });
+    await transport.connect();
+
+    await transport.clickPage(pageTarget);
+    await transport.fillPage(pageTarget, "");
+    await transport.typePage(pageTarget, " appended");
+    await transport.pressPage(pageTarget, { key: "Enter" });
+    await transport.selectPage(pageTarget, ["one"]);
+    await transport.checkPage(pageTarget);
+    await transport.uncheckPage(pageTarget);
+    await transport.submitPage(pageTarget);
+    await transport.backPage(pageTarget);
+    await transport.forwardPage(pageTarget);
+
+    expect(extension.methodsCalled.slice(-10)).toEqual([
+      "pages.click",
+      "pages.fill",
+      "pages.type",
+      "pages.press",
+      "pages.select",
+      "pages.check",
+      "pages.uncheck",
+      "pages.submit",
+      "pages.back",
+      "pages.forward",
+    ]);
+    expect(calls[0]).toEqual({ target: pageTarget });
+    expect(calls[1]).toEqual({
+      target: pageTarget,
+      value: "",
+    });
+    expect(calls.at(-1)).toEqual({
+      target: {
+        tabId: "tab-1",
+        documentId: "document-1",
+      },
+    });
+  });
+
+  it("assigns only explicit absolute staged upload paths", async () => {
+    let requested: unknown;
+    const { transport, extension } = connectedTransport({
+      "pages.upload": (params) => {
+        requested = params;
+        return {
+          performed: true,
+          documentId: "document-1",
+          fileCount: 1,
+        };
+      },
+    });
+    await transport.connect();
+
+    await expect(
+      transport.uploadPage(pageTarget, ["/private/tmp/zen-stage/report.pdf"]),
+    ).resolves.toEqual({
+      performed: true,
+      documentId: "document-1",
+      fileCount: 1,
+    });
+    expect(requested).toEqual({
+      target: pageTarget,
+      paths: ["/private/tmp/zen-stage/report.pdf"],
+    });
+    const before = [...extension.methodsCalled];
+    await expect(
+      transport.uploadPage(pageTarget, ["relative.pdf"]),
+    ).rejects.toThrow(/absolute staged paths/);
+    expect(extension.methodsCalled).toEqual(before);
+  });
+
+  it("validates bounded media metadata, captions, and non-DRM bytes", async () => {
+    const bytes = Buffer.from("speech");
+    const { transport } = connectedTransport({
+      "pages.media.list": () => ({
+        media: [
+          {
+            elementRef: "media-1",
+            frameRef: "frame-1",
+            kind: "audio",
+            sourceUrl: "https://example.com/speech.wav",
+            duration: 1.5,
+            currentTime: 0,
+            paused: true,
+            muted: false,
+            volume: 1,
+            readyState: 4,
+            drm: false,
+            captions: [
+              {
+                kind: "captions",
+                label: "English",
+                language: "en",
+                mode: "showing",
+                cues: [{ startTime: 0, endTime: 1, text: "Hello" }],
+                cuesAvailable: true,
+                truncated: false,
+              },
+            ],
+          },
+        ],
+        truncated: false,
+      }),
+      "pages.media.fetch": () => ({
+        mimeType: "audio/wav",
+        bytes: bytes.byteLength,
+        dataBase64: bytes.toString("base64"),
+      }),
+    });
+    await transport.connect();
+
+    const listed = await transport.listPageMedia(pageTarget);
+    expect(listed.media[0]).toMatchObject({
+      elementRef: "media-1",
+      drm: false,
+      captions: [{ cues: [{ text: "Hello" }] }],
+    });
+    await expect(
+      transport.fetchPageMedia(
+        { ...pageTarget, elementRef: "media-1" },
+        { maxBytes: 32 * 1024 * 1024 },
+      ),
+    ).resolves.toMatchObject({
+      mimeType: "audio/wav",
+      bytes: 6,
+    });
+  });
+
+  it("validates resource bytes and background PNG screenshots", async () => {
+    const resource = Buffer.from("download");
+    const png = Buffer.from([137, 80, 78, 71]);
+    const { transport } = connectedTransport({
+      "pages.resource.fetch": () => ({
+        mimeType: "application/octet-stream",
+        bytes: resource.byteLength,
+        dataBase64: resource.toString("base64"),
+      }),
+      "pages.screenshot": () => ({
+        mimeType: "image/png",
+        width: 640,
+        height: 480,
+        bytes: png.byteLength,
+        dataBase64: png.toString("base64"),
+      }),
+    });
+    await transport.connect();
+
+    await expect(
+      transport.fetchPageResource(pageTarget, "/download", { maxBytes: 64 }),
+    ).resolves.toMatchObject({ bytes: 8 });
+    await expect(
+      transport.screenshotPage(pageTarget, {
+        scale: 1,
+        background: "#ffffff",
+      }),
+    ).resolves.toMatchObject({
+      mimeType: "image/png",
+      width: 640,
+      height: 480,
+    });
+  });
+
+  it("requires each granular page capability before sending", async () => {
+    const { transport, extension } = connectedTransport({
+      "session.describe": () =>
+        describeResult(
+          allCapabilities.filter(
+            (capability) => capability !== "browser.pages.fill",
+          ),
+        ),
+      "pages.fill": () => ({ performed: true, documentId: "document-1" }),
+    });
+    await transport.connect();
+    const before = [...extension.methodsCalled];
+
+    await expect(transport.fillPage(pageTarget, "secret")).rejects.toThrow(
+      /browser\.pages\.fill/,
+    );
+    expect(extension.methodsCalled).toEqual(before);
+  });
+
+  it("recognizes stale page reference errors from the extension", () => {
+    expect(
+      parseMessage(
+        errorResponse("unused", {
+          code: "stale-document",
+          message: "The document reference is stale.",
+        }),
+      ),
+    ).toMatchObject({
+      type: "error",
+      error: { code: "stale-document" },
+    });
   });
 
   it("times out a request the extension never answers", async () => {

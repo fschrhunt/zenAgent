@@ -1,20 +1,12 @@
 /**
- * Attaching to the user's real Zen -- the one in their Dock, on their default
- * profile -- rather than starting a throwaway alongside it.
+ * Read-only discovery helpers for the user's already-running daily Zen.
  *
- * The rule that matters here: **never exec the binary directly.** Running
- * `/Applications/Zen.app/Contents/MacOS/zen` bypasses LaunchServices and
- * registers a second application, which gets its own Dock tile and, if it is
- * not shut down cleanly, leaves a stale one behind. Going through `open -a`
- * hands the launch to LaunchServices, which binds it to the existing Zen tile
- * and the user's default profile.
- *
- * `launchScratchZen` in ./zen.ts is the opposite case and stays as it is: it
- * deliberately wants an isolated instance, and it runs headless so it never
- * appears in the Dock at all.
+ * No helper in this module launches, activates, attaches to, or changes that
+ * browser. Production background launch remains disabled; automated browser
+ * work uses the isolated `launchScratchZen` fixture in ./zen.ts instead.
  */
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -161,68 +153,4 @@ export function assertSafeToAttach(profileDir: string): void {
       `including disabling Safe Browsing and the password manager. Set it in ` +
       `about:config (or in prefs.js while Zen is closed) and try again.`,
   );
-}
-
-export interface LaunchDailyOptions {
-  /**
-   * Start the WebDriver BiDi remote agent on this port.
-   *
-   * Omit it. Under ADR 0001 the transport is an in-browser extension, which
-   * needs no remote protocol, so a plain launch is the normal case. Passing a
-   * port opts into the rejected BiDi path and everything that comes with it: a
-   * robot icon in the URL bar for the whole browser run, and the preference
-   * rewriting that `assertSafeToAttach` guards against.
-   */
-  readonly remoteDebuggingPort?: number;
-  readonly profileDir?: string;
-}
-
-/**
- * Launches the user's own Zen -- the pinned application, on their default
- * profile.
- *
- * Uses `open -a`, which hands the launch to LaunchServices so it binds to the
- * Dock tile the user already has. Executing the binary directly would register
- * a separate application and add a second tile, which is what happened during
- * this spike.
- *
- * Refuses to run when Zen is already up: `open` would only activate the
- * existing window, and with the extension transport there is nothing to attach
- * anyway.
- */
-export function launchDailyZen(options: LaunchDailyOptions = {}): void {
-  const { remoteDebuggingPort } = options;
-
-  if (remoteDebuggingPort !== undefined) {
-    const profile = options.profileDir ?? resolveDefaultProfile();
-    if (profile === undefined) {
-      throw new Error("Could not resolve the default Zen profile.");
-    }
-    assertSafeToAttach(profile);
-  }
-
-  const running = findRunningZen();
-  if (running !== undefined) {
-    throw new Error(
-      `Zen is already running (pid ${String(running)}); nothing to launch.`,
-    );
-  }
-
-  const args =
-    remoteDebuggingPort === undefined
-      ? ["-a", ZEN_APP]
-      : [
-          "-a",
-          ZEN_APP,
-          "--args",
-          "--remote-debugging-port",
-          String(remoteDebuggingPort),
-        ];
-
-  // Detached, because `open` returns as soon as the app is handed off.
-  const child = spawn("/usr/bin/open", args, {
-    stdio: "ignore",
-    detached: true,
-  });
-  child.unref();
 }

@@ -46,6 +46,8 @@ export interface SnapshotOptions {
   readonly sequence: number;
   /** When the transport connected, for the session record. */
   readonly connectedAt: string;
+  /** Capabilities already accepted for the connected exact browser build. */
+  readonly capabilities?: readonly TransportCapability[];
   readonly privateWindowPolicy?: PrivateWindowPolicy;
 }
 
@@ -94,13 +96,22 @@ function observeSelected(
   tab: ZenTabPayload,
   capabilities: readonly TransportCapability[],
 ): Observation<boolean> {
-  if (tab.selected !== null) {
-    return known(tab.selected);
+  if (!capabilities.includes("browser.tabs.selected")) {
+    return unsupported("browser.tabs.selected");
   }
 
-  return capabilities.includes("browser.tabs.selected")
-    ? unknown("not-reported")
-    : unsupported("browser.tabs.selected");
+  return observe(tab.selected);
+}
+
+function observeFocused(
+  focused: boolean | null,
+  capabilities: readonly TransportCapability[],
+): Observation<boolean> {
+  if (!capabilities.includes("browser.windows.focused")) {
+    return unsupported("browser.windows.focused");
+  }
+
+  return observe(focused);
 }
 
 /**
@@ -204,12 +215,13 @@ function toWindow(
   window: ZenWindowPayload,
   profile: BrowserProfile,
   session: BrowserSessionId,
+  capabilities: readonly TransportCapability[],
 ): BrowserWindow {
   return {
     kind: "window",
     id: sessionEntityId("window", session, window.id),
     profileId: profile.id,
-    focused: observe(window.focused),
+    focused: observeFocused(window.focused, capabilities),
     private: observe(window.private),
     state: "open",
   };
@@ -229,7 +241,8 @@ export function toBrowserSnapshot(
 ): BrowserSnapshot {
   const privateWindowPolicy =
     options.privateWindowPolicy ?? DEFAULT_PRIVATE_WINDOW_POLICY;
-  const capabilities = knownCapabilities(payload.session.capabilities);
+  const capabilities =
+    options.capabilities ?? knownCapabilities(payload.session.capabilities);
 
   const profile: BrowserProfile = {
     kind: "profile",
@@ -260,7 +273,7 @@ export function toBrowserSnapshot(
       continue;
     }
 
-    const windowEntity = toWindow(window, profile, session);
+    const windowEntity = toWindow(window, profile, session, capabilities);
     windows.push(windowEntity);
 
     const spacesById = new Map<string, BrowserSpaceId>();

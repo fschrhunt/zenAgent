@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import {
   DAEMON_PROTOCOL_VERSION,
+  daemonProtocolVersionMismatch,
   daemonErrorResponse,
   DaemonMessageDecoder,
   DaemonProtocolError,
@@ -17,6 +18,12 @@ interface PendingRequest {
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
   readonly timer: ReturnType<typeof setTimeout>;
+  readonly removeAbortListener?: () => void;
+}
+
+export interface DaemonRequestOptions {
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
 }
 
 export interface DaemonClientOptions {
@@ -84,6 +91,7 @@ export class DaemonClient {
     method: DaemonMethod,
     params?: unknown,
     idempotencyKey?: string,
+    options: DaemonRequestOptions = {},
   ): Promise<unknown> {
     const socket = this.#socket;
 
@@ -91,6 +99,15 @@ export class DaemonClient {
       throw new DaemonProtocolError(
         "browser-unavailable",
         "The daemon client is not connected.",
+      );
+    }
+
+    if (options.signal?.aborted) {
+      return Promise.reject(
+        new DaemonProtocolError(
+          "cancelled",
+          "The daemon request was cancelled before it started.",
+        ),
       );
     }
 
@@ -106,17 +123,35 @@ export class DaemonClient {
     };
 
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(id);
-        reject(
-          new DaemonProtocolError(
-            "timeout",
-            `${method} did not answer before the client timeout.`,
-          ),
-        );
-      }, this.#options.requestTimeoutMs ?? 10_000);
+      const timer = setTimeout(
+        () => {
+          this.#pending.delete(id);
+          removeAbortListener?.();
+          this.#cancelOperation(socket, id);
+          reject(
+            new DaemonProtocolError(
+              "timeout",
+              `${method} did not answer before the client timeout.`,
+            ),
+          );
+        },
+        options.timeoutMs ?? this.#options.requestTimeoutMs ?? 10_000,
+      );
       timer.unref?.();
-      this.#pending.set(id, { resolve, reject, timer });
+      const onAbort = (): void => {
+        this.#cancelOperation(socket, id);
+      };
+      const removeAbortListener =
+        options.signal === undefined
+          ? undefined
+          : (): void => options.signal?.removeEventListener("abort", onAbort);
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      this.#pending.set(id, {
+        resolve,
+        reject,
+        timer,
+        ...(removeAbortListener === undefined ? {} : { removeAbortListener }),
+      });
       socket.write(encodeDaemonMessage(request));
     });
   }
@@ -145,6 +180,7 @@ export class DaemonClient {
 
     this.#pending.delete(message.id);
     clearTimeout(pending.timer);
+    pending.removeAbortListener?.();
 
     if (message.type === "error") {
       pending.reject(
@@ -165,8 +201,21 @@ export class DaemonClient {
     for (const [id, pending] of this.#pending) {
       this.#pending.delete(id);
       clearTimeout(pending.timer);
+      pending.removeAbortListener?.();
       pending.reject(failure);
     }
+  }
+
+  #cancelOperation(socket: Socket, operationId: string): void {
+    const request: DaemonRequest = {
+      protocolVersion: DAEMON_PROTOCOL_VERSION,
+      type: "request",
+      id: randomUUID(),
+      clientId: this.#clientId,
+      method: "operations.cancel",
+      params: { operationId },
+    };
+    socket.write(encodeDaemonMessage(request));
   }
 }
 
@@ -183,10 +232,7 @@ function parseServerMessage(
   const record = value as Readonly<Record<string, unknown>>;
 
   if (record["protocolVersion"] !== DAEMON_PROTOCOL_VERSION) {
-    throw new DaemonProtocolError(
-      "protocol-version-mismatch",
-      "The daemon and client protocol versions differ.",
-    );
+    throw daemonProtocolVersionMismatch(record["protocolVersion"]);
   }
 
   if (record["type"] === "response" && typeof record["id"] === "string") {

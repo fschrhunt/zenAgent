@@ -11,7 +11,7 @@ native-host daemon
     ├── one Zen transport
     ├── live browser registry
     ├── routing and tab-resolution policy
-    ├── serialized mutation queue
+    ├── bounded per-tab mutation queues
     └── owner-only Unix socket
              ▲
              ├── zen-agent setup CLI
@@ -83,15 +83,25 @@ The public adapters use:
 - explicit open, navigate, reload, close, and move mutations.
 
 There is no active-tab shorthand or activation method. Reads bypass the mutation
-queue. Mutations enter one FIFO queue so two clients cannot race through
-discovery and creation.
+queues. Mutations enter bounded FIFO queues keyed by stable tab ID so two
+clients cannot race through one tab, while unrelated tabs can proceed
+concurrently. Operations that have no target tab use a separate bounded global
+queue.
+
+Navigate, reload, close, cleanup, and move operations accept an optional
+registry-sequence precondition. It is checked after FIFO admission and
+immediately before browser dispatch, so a queued mutation planned against older
+registry state fails with `performed: false`. Page mutations similarly require
+the client's newest retained snapshot for that tab in addition to the
+transport's document, frame, and element generation checks. Older snapshots
+remain valid for bounded reads.
 
 `pages.inspect` is capped at 10,000 visible-text characters and 10,000 visited
 text nodes, has bounded metadata and an 8-second parent deadline, and fails
 closed for discarded, crashed, unavailable, non-HTTP(S), or unsupported tabs.
 Its returned page content goes only to the requesting client and never enters
-default diagnostics. The setup CLI intentionally exposes no page operations, and
-the current MCP adapter does not yet expose this daemon method.
+default diagnostics. The setup CLI intentionally exposes no page operations; the
+MCP adapter exposes browser operations only through this daemon.
 
 See [ADR 0002](adr/0002-shared-local-daemon.md) for the complete protocol and
 reconnect rationale.

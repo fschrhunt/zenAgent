@@ -28,6 +28,24 @@ afterEach(() => {
 });
 
 describe("the production native daemon host", () => {
+  it("fails closed when private-window access has not passed its headed gate", async () => {
+    await expect(
+      startNativeDaemonHost({
+        transport: fakeDaemonTransport(),
+        privateWindowPolicy: "explicit",
+        paths: () => temporaryPaths(),
+        log: () => undefined,
+      }),
+    ).rejects.toMatchObject({
+      code: "unsupported-capability",
+      data: {
+        reason: "private-window-proof-required",
+        resource: "private-window",
+        retryable: false,
+      },
+    });
+  });
+
   it("publishes the connected profile registry over its Unix socket", async () => {
     const paths = temporaryPaths();
     const transport = fakeDaemonTransport();

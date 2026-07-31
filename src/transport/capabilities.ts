@@ -25,12 +25,18 @@ export const SUPPORTED_ZEN_BUILDS = [
   {
     browserVersion: "1.21.9b",
     geckoVersion: "153.0",
+    operatingSystem: "Darwin",
+    operatingSystemVersion: "27.0.0",
+    xpcomAbi: "aarch64-gcc3",
   },
 ] as const;
 
 export interface ZenBuildVersion {
   readonly browserVersion: string;
   readonly geckoVersion: string;
+  readonly operatingSystem: string;
+  readonly operatingSystemVersion: string;
+  readonly xpcomAbi: string;
 }
 
 export const TRANSPORT_CAPABILITIES = [
@@ -52,9 +58,75 @@ export const TRANSPORT_CAPABILITIES = [
   "browser.windows.private",
   /** Packaged JSWindowActor can inspect a loaded page without activation. */
   "browser.pages.inspect",
+  /** Packaged JSWindowActors can aggregate a bounded semantic page snapshot. */
+  "browser.pages.snapshot",
+  /** A live semantic snapshot can be queried without retaining page content. */
+  "browser.pages.query",
+  /** Targeted DOM click is available without activation or native input. */
+  "browser.pages.click",
+  /** Targeted DOM fill is available without activation or native input. */
+  "browser.pages.fill",
+  /** Targeted DOM text insertion is available without native input. */
+  "browser.pages.type",
+  /** Targeted bounded key dispatch is available without native input. */
+  "browser.pages.press",
+  /** Targeted select mutation is available. */
+  "browser.pages.select",
+  /** Targeted checkbox and radio mutation is available. */
+  "browser.pages.check",
+  /** Targeted form submission is available. */
+  "browser.pages.submit",
+  /** Explicit background-tab history traversal is available. */
+  "browser.pages.history",
+  /** Explicit staged paths can be assigned without opening a file picker. */
+  "browser.pages.upload",
+  /** Media metadata, captions, and bounded non-DRM bytes are available. */
+  "browser.pages.media",
+  /** Bounded same-origin credentialed resource bytes can be fetched. */
+  "browser.pages.resource-fetch",
+  /** Parent-process drawSnapshot can capture an explicit background frame. */
+  "browser.pages.screenshot",
 ] as const;
 
 export type TransportCapability = (typeof TRANSPORT_CAPABILITIES)[number];
+
+const PROVEN_BUILD = SUPPORTED_ZEN_BUILDS[0];
+
+/**
+ * Exact headed-proof gates for individual capabilities.
+ *
+ * This is intentionally exhaustive rather than derived from
+ * `TRANSPORT_CAPABILITIES`: adding a recognised protocol name must not silently
+ * make it accepted on an existing browser build. A capability enters this
+ * matrix only after its own three-run non-interference proof.
+ */
+export const ACCEPTED_CAPABILITY_BUILDS = {
+  "zen.spaces.enumerate": [PROVEN_BUILD],
+  "zen.spaces.route": [PROVEN_BUILD],
+  "zen.tabs.enumerate-all-spaces": [PROVEN_BUILD],
+  "zen.tabs.open-background": [PROVEN_BUILD],
+  "browser.tabs.selected": [PROVEN_BUILD],
+  "browser.windows.focused": [PROVEN_BUILD],
+  "browser.tabs.media-state": [PROVEN_BUILD],
+  "browser.windows.private": [PROVEN_BUILD],
+  "browser.pages.inspect": [PROVEN_BUILD],
+  "browser.pages.snapshot": [PROVEN_BUILD],
+  "browser.pages.query": [PROVEN_BUILD],
+  "browser.pages.click": [PROVEN_BUILD],
+  "browser.pages.fill": [PROVEN_BUILD],
+  "browser.pages.type": [PROVEN_BUILD],
+  "browser.pages.press": [PROVEN_BUILD],
+  "browser.pages.select": [PROVEN_BUILD],
+  "browser.pages.check": [PROVEN_BUILD],
+  "browser.pages.submit": [PROVEN_BUILD],
+  "browser.pages.history": [PROVEN_BUILD],
+  "browser.pages.upload": [PROVEN_BUILD],
+  "browser.pages.media": [PROVEN_BUILD],
+  "browser.pages.resource-fetch": [PROVEN_BUILD],
+  "browser.pages.screenshot": [PROVEN_BUILD],
+} as const satisfies Readonly<
+  Record<TransportCapability, readonly ZenBuildVersion[]>
+>;
 
 /**
  * Capabilities without which the product's first two principles — look before
@@ -92,6 +164,36 @@ export function knownCapabilities(
   return reported.filter(isTransportCapability);
 }
 
+export function isCapabilityAcceptedOnBuild(
+  capability: TransportCapability,
+  build: ZenBuildVersion,
+): boolean {
+  return ACCEPTED_CAPABILITY_BUILDS[capability].some(
+    (accepted) =>
+      accepted.browserVersion === build.browserVersion &&
+      accepted.geckoVersion === build.geckoVersion &&
+      accepted.operatingSystem === build.operatingSystem &&
+      accepted.operatingSystemVersion === build.operatingSystemVersion &&
+      accepted.xpcomAbi === build.xpcomAbi,
+  );
+}
+
+/**
+ * Keep only recognised capabilities that passed their own exact-build proof.
+ *
+ * Runtime primitive detection remains the extension's responsibility. This
+ * second gate prevents a buggy or newer extension from advertising an
+ * unaccepted operation to the daemon.
+ */
+export function acceptedCapabilities(
+  reported: readonly unknown[],
+  build: ZenBuildVersion,
+): readonly TransportCapability[] {
+  return knownCapabilities(reported).filter((capability) =>
+    isCapabilityAcceptedOnBuild(capability, build),
+  );
+}
+
 export function hasCapability(
   capabilities: readonly TransportCapability[],
   capability: TransportCapability,
@@ -103,7 +205,10 @@ export function isSupportedZenBuild(build: ZenBuildVersion): boolean {
   return SUPPORTED_ZEN_BUILDS.some(
     (supported) =>
       supported.browserVersion === build.browserVersion &&
-      supported.geckoVersion === build.geckoVersion,
+      supported.geckoVersion === build.geckoVersion &&
+      supported.operatingSystem === build.operatingSystem &&
+      supported.operatingSystemVersion === build.operatingSystemVersion &&
+      supported.xpcomAbi === build.xpcomAbi,
   );
 }
 
@@ -121,12 +226,12 @@ export function assertSupportedZenBuild(build: ZenBuildVersion): void {
 
   const supported = SUPPORTED_ZEN_BUILDS.map(
     (candidate) =>
-      `Zen ${candidate.browserVersion} / Gecko ${candidate.geckoVersion}`,
+      `Zen ${candidate.browserVersion} / Gecko ${candidate.geckoVersion} / ${candidate.operatingSystem} ${candidate.operatingSystemVersion} / ${candidate.xpcomAbi}`,
   ).join(", ");
 
   throw new TransportProtocolError(
     "unsupported-capability",
-    `Zen ${build.browserVersion} / Gecko ${build.geckoVersion} has not passed Zen Agent's headed safety proof, so Zen Agent will not operate on it. Supported builds: ${supported}.`,
+    `Zen ${build.browserVersion} / Gecko ${build.geckoVersion} / ${build.operatingSystem} ${build.operatingSystemVersion} / ${build.xpcomAbi} has not passed Zen Agent's headed safety proof, so Zen Agent will not operate on it. Supported builds: ${supported}.`,
   );
 }
 

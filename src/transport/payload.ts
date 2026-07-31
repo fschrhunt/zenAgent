@@ -25,6 +25,9 @@ export interface ZenSessionPayload {
   readonly sessionId: string;
   readonly browserVersion: string;
   readonly geckoVersion: string;
+  readonly operatingSystem: string;
+  readonly operatingSystemVersion: string;
+  readonly xpcomAbi: string;
   readonly capabilities: readonly string[];
   readonly profileName: string | null;
   readonly isDefaultProfile: boolean | null;
@@ -202,6 +205,15 @@ function parseSession(value: unknown): ZenSessionPayload {
       "session.browserVersion",
     ),
     geckoVersion: requireString(value["geckoVersion"], "session.geckoVersion"),
+    operatingSystem: requireString(
+      value["operatingSystem"],
+      "session.operatingSystem",
+    ),
+    operatingSystemVersion: requireString(
+      value["operatingSystemVersion"],
+      "session.operatingSystemVersion",
+    ),
+    xpcomAbi: requireString(value["xpcomAbi"], "session.xpcomAbi"),
     capabilities: capabilities.map((capability, index) =>
       requireString(capability, `session.capabilities[${String(index)}]`),
     ),

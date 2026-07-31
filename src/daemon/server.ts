@@ -58,6 +58,7 @@ export class DaemonSocketServer {
   readonly #options: DaemonSocketServerOptions;
   readonly #logger: DaemonLogger;
   readonly #clients = new Set<Socket>();
+  readonly #clientIds = new Map<Socket, string>();
 
   #server: Server | undefined;
   #lockHandle: FileHandle | undefined;
@@ -138,6 +139,7 @@ export class DaemonSocketServer {
     }
 
     this.#clients.clear();
+    this.#clientIds.clear();
     const server = this.#server;
     this.#server = undefined;
 
@@ -175,7 +177,20 @@ export class DaemonSocketServer {
       }
     });
     const remove = (): void => {
-      this.#clients.delete(socket);
+      if (!this.#clients.delete(socket)) {
+        return;
+      }
+
+      const clientId = this.#clientIds.get(socket);
+      this.#clientIds.delete(socket);
+
+      if (clientId !== undefined) {
+        void this.#options.service.disconnectClient(clientId).catch(() => {
+          this.#logger.log("warn", "socket", "client.cleanup-failed", {
+            clientId,
+          });
+        });
+      }
     };
     socket.on("close", remove);
     socket.on("error", remove);
@@ -188,6 +203,23 @@ export class DaemonSocketServer {
       request = parseDaemonRequest(raw);
     } catch (error) {
       this.#writeError(socket, requestIdOf(raw), error);
+      return;
+    }
+
+    const boundClientId = this.#clientIds.get(socket);
+
+    if (boundClientId === undefined) {
+      this.#clientIds.set(socket, request.clientId);
+    } else if (boundClientId !== request.clientId) {
+      this.#writeError(
+        socket,
+        request.id,
+        new DaemonProtocolError(
+          "invalid-request",
+          "A daemon socket may carry requests for only one client identity.",
+        ),
+      );
+      socket.end();
       return;
     }
 

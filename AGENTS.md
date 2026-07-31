@@ -25,8 +25,9 @@ passes:
   disturb the browser.
 - **Model what you do not know.** Use the `Observation<T>` three-way
   `known`/`unknown`/`unsupported` from `src/browser/model.ts` instead of
-  inventing a value. Selected and focused state in particular is not observable
-  on the chosen transport.
+  inventing a value. Selected and focused state is observable only when the
+  privileged transport reports the corresponding named capability; otherwise it
+  must remain an `Observation` of `unknown` or `unsupported`.
 - **Keep page content out of logs by default** — URLs, titles, form values,
   cookies, and tokens included.
 

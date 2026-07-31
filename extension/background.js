@@ -38,6 +38,53 @@ const METHODS = {
     browser.zenAgent.inspectPage(params?.tabId, {
       maxChars: params?.maxChars,
     }),
+  "pages.snapshot": (params) =>
+    browser.zenAgent.snapshotPage(params?.tabId, {
+      maxNodes: params?.maxNodes,
+    }),
+  "pages.query": (params) =>
+    browser.zenAgent.queryPage(params?.target, {
+      locator: params?.locator,
+      maxResults: params?.maxResults,
+    }),
+  "pages.click": (params) => browser.zenAgent.clickPage(params?.target),
+  "pages.fill": (params) =>
+    browser.zenAgent.fillPage(params?.target, params?.value),
+  "pages.type": (params) =>
+    browser.zenAgent.typePage(params?.target, params?.value),
+  "pages.press": (params) =>
+    browser.zenAgent.pressPage(params?.target, {
+      key: params?.key,
+      code: params?.code,
+      altKey: params?.altKey,
+      ctrlKey: params?.ctrlKey,
+      metaKey: params?.metaKey,
+      shiftKey: params?.shiftKey,
+    }),
+  "pages.select": (params) =>
+    browser.zenAgent.selectPage(params?.target, params?.values),
+  "pages.check": (params) => browser.zenAgent.checkPage(params?.target),
+  "pages.uncheck": (params) => browser.zenAgent.uncheckPage(params?.target),
+  "pages.submit": (params) => browser.zenAgent.submitPage(params?.target),
+  "pages.upload": (params) =>
+    browser.zenAgent.uploadPage(params?.target, params?.paths),
+  "pages.media.list": (params) =>
+    browser.zenAgent.listPageMedia(params?.target),
+  "pages.media.fetch": (params) =>
+    browser.zenAgent.fetchPageMedia(params?.target, {
+      maxBytes: params?.maxBytes,
+    }),
+  "pages.resource.fetch": (params) =>
+    browser.zenAgent.fetchPageResource(params?.target, params?.url, {
+      maxBytes: params?.maxBytes,
+    }),
+  "pages.screenshot": (params) =>
+    browser.zenAgent.screenshotPage(params?.target, {
+      scale: params?.scale,
+      background: params?.background,
+    }),
+  "pages.back": (params) => browser.zenAgent.backPage(params?.target),
+  "pages.forward": (params) => browser.zenAgent.forwardPage(params?.target),
   "tabs.close": (params) => browser.zenAgent.closeTab(params?.tabId),
 };
 

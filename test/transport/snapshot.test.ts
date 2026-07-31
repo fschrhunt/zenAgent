@@ -197,6 +197,25 @@ describe("snapshot translation", () => {
     );
   });
 
+  it("uses the exact-build accepted capabilities instead of snapshot claims", () => {
+    const snapshot = toBrowserSnapshot(snapshotPayload(), {
+      ...options,
+      capabilities: ["browser.windows.private"],
+    });
+
+    expect(snapshot.sessions[0]?.capabilities).toEqual([
+      "browser.windows.private",
+    ]);
+    expect(snapshot.tabs[0]?.selected).toEqual({
+      status: "unsupported",
+      capability: "browser.tabs.selected",
+    });
+    expect(snapshot.windows[0]?.focused).toEqual({
+      status: "unsupported",
+      capability: "browser.windows.focused",
+    });
+  });
+
   it("discards capabilities it does not recognise", () => {
     const snapshot = toBrowserSnapshot(
       snapshotPayload({

@@ -39,6 +39,15 @@ export interface SetupWizardServices {
   readonly mapSpaces: (
     selection: WizardMappingSelection,
   ) => Promise<WizardMappingResult>;
+  readonly speechLocales?: () => Promise<
+    Readonly<{
+      supportedLocales: readonly string[];
+      installedLocales: readonly string[];
+    }>
+  >;
+  readonly installSpeechLocale?: (
+    locale: string,
+  ) => Promise<Readonly<{ locale: string }>>;
 }
 
 export interface SetupWizardOptions {
@@ -52,6 +61,7 @@ type WizardAction =
   | "quick-setup"
   | "configure-spaces"
   | "check-status"
+  | "install-speech"
   | "repair-host"
   | "uninstall-host"
   | "exit";
@@ -71,6 +81,11 @@ const MAIN_ACTIONS: readonly WizardOption<WizardAction>[] = [
     value: "check-status",
     label: "Check connection",
     hint: "sanitized diagnostics",
+  },
+  {
+    value: "install-speech",
+    label: "Install speech model",
+    hint: "explicit on-device locale download",
   },
   {
     value: "repair-host",
@@ -337,6 +352,55 @@ async function uninstallHost(
   }
 }
 
+async function installSpeechModel(
+  services: SetupWizardServices,
+  ui: WizardUi,
+): Promise<void> {
+  if (
+    services.speechLocales === undefined ||
+    services.installSpeechLocale === undefined
+  ) {
+    ui.warning(
+      "The on-device speech helper is unavailable on this installation.",
+    );
+    return;
+  }
+  try {
+    const inventory = await services.speechLocales();
+    if (inventory.supportedLocales.length === 0) {
+      ui.warning("SpeechTranscriber did not report any supported locales.");
+      return;
+    }
+    const selection = await ui.select(
+      "Which on-device speech model should setup install?",
+      [
+        ...inventory.supportedLocales.map((locale, index) => ({
+          value: `locale:${String(index)}`,
+          label: locale,
+          hint: inventory.installedLocales.includes(locale)
+            ? "already installed"
+            : "downloads an Apple model asset",
+        })),
+        { value: "cancel", label: "Cancel" },
+      ],
+      "cancel",
+    );
+    if (selection === undefined || selection === "cancel") {
+      return;
+    }
+    const locale =
+      inventory.supportedLocales[Number(selection.slice("locale:".length))];
+    if (locale === undefined) {
+      ui.error("The selected speech locale is no longer available.");
+      return;
+    }
+    const result = await services.installSpeechLocale(locale);
+    ui.success(`On-device speech model installed for ${result.locale}.`);
+  } catch (error) {
+    ui.error(`Speech model installation failed: ${errorMessage(error)}`);
+  }
+}
+
 export async function runSetupWizard(
   options: SetupWizardOptions,
 ): Promise<void> {
@@ -365,6 +429,9 @@ export async function runSetupWizard(
         break;
       case "check-status":
         await showStatus(services, ui);
+        break;
+      case "install-speech":
+        await installSpeechModel(services, ui);
         break;
       case "repair-host":
         installHost(services, ui);

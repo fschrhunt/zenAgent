@@ -19,6 +19,7 @@ if (result === undefined) {
 
 const packagedPaths = new Set(result.files.map((file) => file.path));
 const requiredPaths = [
+  "CHANGELOG.md",
   "LICENSE",
   "README.md",
   "dist/cli.js",
@@ -27,7 +28,9 @@ const requiredPaths = [
   "dist/mcp.js",
   "dist/native-host.js",
   "extension/manifest.json",
+  "native/speech-helper/main.swift",
   "package.json",
+  "scripts/build-speech-helper.mjs",
 ];
 const missingPaths = requiredPaths.filter((path) => !packagedPaths.has(path));
 

@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ACCEPTED_CAPABILITY_BUILDS,
+  acceptedCapabilities,
   assertRequiredCapabilities,
   assertSupportedZenBuild,
+  isCapabilityAcceptedOnBuild,
   isSupportedZenBuild,
   knownCapabilities,
   requireCapability,
+  SUPPORTED_ZEN_BUILDS,
+  TRANSPORT_CAPABILITIES,
 } from "../../src/transport/capabilities.js";
 import {
   MAX_BROWSER_TABS,
@@ -177,20 +182,17 @@ describe("protocol messages", () => {
 });
 
 describe("capabilities", () => {
-  it("recognises the exact Zen and Gecko pair proven headed", () => {
-    expect(
-      isSupportedZenBuild({
-        browserVersion: "1.21.9b",
-        geckoVersion: "153.0",
-      }),
-    ).toBe(true);
+  const provenBuild = SUPPORTED_ZEN_BUILDS[0];
+
+  it("recognises the exact headed-proof tuple", () => {
+    expect(isSupportedZenBuild(provenBuild)).toBe(true);
   });
 
   it("refuses an unproven Zen version even if Gecko is unchanged", () => {
     expect(() =>
       assertSupportedZenBuild({
+        ...provenBuild,
         browserVersion: "1.22.0b",
-        geckoVersion: "153.0",
       }),
     ).toThrow(/has not passed Zen Agent's headed safety proof/);
   });
@@ -198,7 +200,7 @@ describe("capabilities", () => {
   it("refuses an unproven Gecko version even if Zen is unchanged", () => {
     expect(() =>
       assertSupportedZenBuild({
-        browserVersion: "1.21.9b",
+        ...provenBuild,
         geckoVersion: "154.0",
       }),
     ).toThrow(/Gecko 154\.0/);
@@ -208,6 +210,49 @@ describe("capabilities", () => {
     expect(
       knownCapabilities(["zen.spaces.route", "zen.invented.capability"]),
     ).toEqual(["zen.spaces.route"]);
+  });
+
+  it("requires an explicit exact-build acceptance entry for every capability", () => {
+    expect(Object.keys(ACCEPTED_CAPABILITY_BUILDS).sort()).toEqual(
+      [...TRANSPORT_CAPABILITIES].sort(),
+    );
+    expect(
+      TRANSPORT_CAPABILITIES.every((capability) =>
+        isCapabilityAcceptedOnBuild(capability, {
+          ...provenBuild,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("filters each reported capability through its own exact build gate", () => {
+    expect(
+      acceptedCapabilities(
+        ["browser.pages.upload", "browser.pages.screenshot"],
+        { ...provenBuild, geckoVersion: "154.0" },
+      ),
+    ).toEqual([]);
+    expect(
+      acceptedCapabilities(
+        ["browser.pages.upload", "zen.invented.capability"],
+        provenBuild,
+      ),
+    ).toEqual(["browser.pages.upload"]);
+  });
+
+  it("refuses an unproven OS version or architecture", () => {
+    expect(
+      isSupportedZenBuild({
+        ...provenBuild,
+        operatingSystemVersion: "26.0.0",
+      }),
+    ).toBe(false);
+    expect(
+      acceptedCapabilities(["browser.pages.click"], {
+        ...provenBuild,
+        xpcomAbi: "x86_64-gcc3",
+      }),
+    ).toEqual([]);
   });
 
   it("names the Zen version when a required capability is missing", () => {

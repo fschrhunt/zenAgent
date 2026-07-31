@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { access, lstat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type {
@@ -11,6 +15,7 @@ import { configPath } from "../config/path.js";
 import {
   CONFIG_SCHEMA_VERSION,
   ConfigValidationError,
+  DEFAULT_DOWNLOAD_DIRECTORY,
   parseConfig,
   type ZenAgentConfig,
 } from "../config/schema.js";
@@ -38,6 +43,17 @@ import {
   parseSpaceReference,
 } from "./entity-reference.js";
 import { runSetupWizard, type SetupWizardServices } from "./wizard.js";
+import {
+  inspectSpeechHelper,
+  installSpeechLocale,
+  speechLocales,
+  SpeechHelperError,
+  transcribeAudio,
+  type SpeechHelperInspection,
+  type SpeechInstallResult,
+  type SpeechLocaleInventory,
+  type SpeechTranscriptResult,
+} from "./speech.js";
 import { createTerminalWizardUi } from "./wizard-ui.js";
 
 const EXTENSION_MANIFEST_PATH = fileURLToPath(
@@ -67,8 +83,13 @@ Usage:
 Commands:
   setup                 Open the interactive setup wizard
   status                Report sanitized daemon and browser health
+  doctor                Check the complete sanitized local setup
   spaces list           List discovered Spaces without selecting them
   config map            Map discovered Space IDs in the local configuration
+  config migrate        Rewrite a version 1 config as strict version 2
+  speech locales        List supported and installed on-device speech locales
+  speech install        Explicitly download one on-device speech model
+  speech transcribe     Transcribe one prerecorded local audio file on device
   native-host install   Register the per-user native messaging host
   native-host uninstall Remove files created by the native-host installer
   help                  Show this help
@@ -92,6 +113,13 @@ Side effects:
   None. Reads sanitized daemon and browser connection state.
 `;
 
+const DOCTOR_HELP = `Usage:
+  zen-agent doctor [--json]
+
+Side effects:
+  None. Reports only sanitized setup, version, policy, and capability state.
+`;
+
 const SPACES_HELP = `Usage:
   zen-agent spaces list [--json]
 
@@ -104,10 +132,23 @@ const CONFIG_HELP = `Usage:
                        [--work <opaque-space-id>]
                        [--alias <name>=<opaque-space-id>]...
                        [--profile <profile-id>] [--config <path>] [--json]
+  zen-agent config migrate [--config <path>] [--json]
 
 Side effects:
   Discovers Spaces without selecting them, then atomically creates or updates
   the local configuration file. Existing routing rules are preserved.
+`;
+
+const SPEECH_HELP = `Usage:
+  zen-agent speech locales [--json]
+  zen-agent speech install --locale <canonical-bcp47> [--json]
+  zen-agent speech transcribe --locale <canonical-bcp47>
+                              --input <absolute-audio-path> [--json]
+
+Side effects:
+  locales is read-only. install is the only command allowed to download an
+  Apple SpeechTranscriber model. transcribe reads prerecorded local audio and
+  requires an already-installed model; it never downloads or opens UI.
 `;
 
 const NATIVE_HOST_HELP = `Usage:
@@ -138,6 +179,16 @@ export interface CliDependencies {
     options?: NativeHostInstallOptions,
   ) => NativeHostInstallResult;
   readonly uninstallNativeHost: () => NativeHostUninstallResult;
+  readonly inspectSpeechHelper: () => SpeechHelperInspection;
+  readonly speechLocales: () => SpeechLocaleInventory;
+  readonly installSpeechLocale: (locale: string) => SpeechInstallResult;
+  readonly transcribeAudio: (
+    locale: string,
+    inputPath: string,
+  ) => SpeechTranscriptResult;
+  readonly inspectDownloadDirectory: (
+    directory: string,
+  ) => Promise<"writable" | "missing" | "invalid" | "not-writable">;
   readonly createDaemonClient: (
     profileId: string | undefined,
   ) => CliDaemonClient | Promise<CliDaemonClient>;
@@ -169,6 +220,17 @@ function defaultDependencies(
       overrides.inspectNativeHost ?? inspectNativeHostInstallation,
     installNativeHost: overrides.installNativeHost ?? installNativeHost,
     uninstallNativeHost: overrides.uninstallNativeHost ?? uninstallNativeHost,
+    inspectSpeechHelper:
+      overrides.inspectSpeechHelper ?? (() => inspectSpeechHelper()),
+    speechLocales: overrides.speechLocales ?? (() => speechLocales()),
+    installSpeechLocale:
+      overrides.installSpeechLocale ??
+      ((locale) => installSpeechLocale(locale)),
+    transcribeAudio:
+      overrides.transcribeAudio ??
+      ((locale, inputPath) => transcribeAudio(locale, inputPath)),
+    inspectDownloadDirectory:
+      overrides.inspectDownloadDirectory ?? inspectDownloadDirectory,
     createDaemonClient:
       overrides.createDaemonClient ??
       (async (profileId) =>
@@ -386,7 +448,11 @@ function isInputError(error: unknown): boolean {
     error instanceof CliInputError ||
     error instanceof EntityReferenceError ||
     error instanceof ConfigValidationError ||
-    error instanceof SpaceMappingError
+    error instanceof SpaceMappingError ||
+    (error instanceof SpeechHelperError &&
+      (error.code === "invalid-input" ||
+        error.code === "invalid-locale" ||
+        error.code === "invalid-arguments"))
   );
 }
 
@@ -400,6 +466,15 @@ function errorExitCode(error: unknown): CliExitCode {
   }
 
   if (!(error instanceof DaemonProtocolError)) {
+    if (error instanceof SpeechHelperError) {
+      return error.code === "unsupported-platform" ||
+        error.code === "unsupported-version" ||
+        error.code === "unsupported-locale" ||
+        error.code === "speech-helper-unavailable" ||
+        error.code === "model-not-installed"
+        ? CLI_EXIT_CODES.unsupportedCapability
+        : CLI_EXIT_CODES.internal;
+    }
     return CLI_EXIT_CODES.internal;
   }
 
@@ -433,9 +508,11 @@ function reportError(error: unknown, json: boolean): CliExitCode {
       ? error.code
       : error instanceof DaemonDiscoveryError
         ? error.code
-        : isInputError(error)
-          ? "invalid-input"
-          : "internal";
+        : error instanceof SpeechHelperError
+          ? error.code
+          : isInputError(error)
+            ? "invalid-input"
+            : "internal";
   const message = error instanceof Error ? error.message : String(error);
 
   if (json) {
@@ -502,6 +579,29 @@ async function withDaemon<T>(
   }
 }
 
+async function reloadConfigAfterLocalWrite(
+  profileId: string,
+  dependencies: CliDependencies,
+): Promise<void> {
+  try {
+    await withDaemon(profileId, dependencies, (client) =>
+      client.request("config.reload", {}, `cli:config-reload:${randomUUID()}`),
+    );
+  } catch (error) {
+    // Speech assets can be installed before Zen starts. A later native host
+    // loads the new file at startup, while an already-running host is refreshed
+    // immediately above.
+    if (
+      error instanceof DaemonProtocolError &&
+      error.code === "browser-unavailable"
+    ) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
 async function runStatus(
   args: readonly string[],
   dependencies: CliDependencies,
@@ -542,6 +642,178 @@ async function readStatus(dependencies: CliDependencies): Promise<unknown> {
   return withDaemon(profile, dependencies, (client) =>
     client.request("status"),
   );
+}
+
+async function runDoctor(
+  args: readonly string[],
+  dependencies: CliDependencies,
+): Promise<CliExitCode> {
+  if (args.includes("--help")) {
+    process.stdout.write(DOCTOR_HELP);
+    return CLI_EXIT_CODES.success;
+  }
+  const parsed = parseArguments(args, new Set(["--json"]), new Set());
+  requirePositionals(parsed, 0, "Usage: zen-agent doctor [--json]");
+  const config = await dependencies.readConfig(dependencies.configPath());
+  let nativeHost: NativeHostInstallation;
+  try {
+    nativeHost = dependencies.inspectNativeHost();
+  } catch {
+    nativeHost = {
+      status: "invalid",
+      manifestPath: "",
+      launcherPath: "",
+    };
+  }
+  const speechHelper = dependencies.inspectSpeechHelper();
+  let inventory: SpeechLocaleInventory | undefined;
+  if (speechHelper.status === "available") {
+    try {
+      inventory = dependencies.speechLocales();
+    } catch {
+      inventory = undefined;
+    }
+  }
+  let daemon: unknown;
+  try {
+    daemon = await readStatus(dependencies);
+  } catch (error) {
+    daemon = {
+      state: "unavailable",
+      errorCode:
+        error instanceof DaemonProtocolError
+          ? error.code
+          : "browser-unavailable",
+    };
+  }
+  const daemonRecord = isRecord(daemon) ? daemon : {};
+  const compatibility = isRecord(daemonRecord["compatibility"])
+    ? daemonRecord["compatibility"]
+    : {};
+  const configuredDownloads =
+    config?.downloads?.directory ?? DEFAULT_DOWNLOAD_DIRECTORY;
+  const downloadsStatus =
+    await dependencies.inspectDownloadDirectory(configuredDownloads);
+  const configuredLocales = config?.speech?.installedLocales ?? [];
+  const installedLocales = inventory?.installedLocales ?? [];
+  const result = {
+    productVersion: ZEN_AGENT_VERSION,
+    config: {
+      status: config === undefined ? "missing" : "valid",
+      schemaVersion: config?.version ?? null,
+      profileConfigured: config !== undefined,
+      profileMatch: config?.profileMatch ?? "exact",
+      profileStatus:
+        config === undefined || typeof daemonRecord["profileId"] !== "string"
+          ? "unavailable"
+          : daemonRecord["profileId"] === config.profile
+            ? "matched"
+            : "mismatch",
+    },
+    nativeHost: { status: nativeHost.status },
+    extension: {
+      status:
+        typeof compatibility["extensionVersion"] === "string"
+          ? "connected"
+          : "not-reported",
+      version:
+        typeof compatibility["extensionVersion"] === "string"
+          ? compatibility["extensionVersion"]
+          : null,
+    },
+    daemon,
+    versions: {
+      zen:
+        typeof compatibility["browserVersion"] === "string"
+          ? compatibility["browserVersion"]
+          : null,
+      gecko:
+        typeof compatibility["geckoVersion"] === "string"
+          ? compatibility["geckoVersion"]
+          : null,
+      extension:
+        typeof compatibility["extensionVersion"] === "string"
+          ? compatibility["extensionVersion"]
+          : null,
+      daemon:
+        typeof daemonRecord["daemonVersion"] === "string"
+          ? daemonRecord["daemonVersion"]
+          : null,
+      protocol:
+        typeof daemonRecord["protocolVersion"] === "number"
+          ? daemonRecord["protocolVersion"]
+          : null,
+    },
+    policies: {
+      privateWindows: config?.privateWindows ?? "hidden",
+      privateWindowCapability:
+        (config?.privateWindows ?? "hidden") === "hidden"
+          ? "disabled"
+          : "unsupported",
+      downloads:
+        configuredDownloads === DEFAULT_DOWNLOAD_DIRECTORY
+          ? "user-downloads"
+          : "custom",
+      downloadsStatus,
+      backgroundLaunch: config?.backgroundLaunch?.policy ?? "disabled",
+    },
+    speech: {
+      helper: speechHelper.status,
+      configuredLocales,
+      installedLocales,
+      assets:
+        configuredLocales.length === 0
+          ? "not-configured"
+          : configuredLocales.every((locale) =>
+                installedLocales.includes(locale),
+              )
+            ? "ready"
+            : "missing",
+    },
+  };
+  writeResult("doctor", result, parsed.flags.has("--json"), () =>
+    [
+      `Configuration: ${result.config.status} (schema ${String(result.config.schemaVersion ?? "none")})`,
+      `Native host: ${result.nativeHost.status}`,
+      `Extension: ${result.extension.status} (${result.extension.version ?? "unknown"})`,
+      `Daemon: ${isRecord(daemon) ? scalarText(daemon["state"], "unknown") : "unknown"}`,
+      `Zen / Gecko: ${result.versions.zen ?? "unknown"} / ${result.versions.gecko ?? "unknown"}`,
+      `Profile match: ${result.config.profileStatus}`,
+      `Private windows: ${result.policies.privateWindows}`,
+      `Downloads: ${result.policies.downloads} (${result.policies.downloadsStatus})`,
+      `Background launch: ${result.policies.backgroundLaunch}`,
+      `Speech helper: ${result.speech.helper}`,
+      `Speech assets: ${result.speech.assets}`,
+      "",
+    ].join("\n"),
+  );
+  return CLI_EXIT_CODES.success;
+}
+
+async function inspectDownloadDirectory(
+  configured: string,
+): Promise<"writable" | "missing" | "invalid" | "not-writable"> {
+  const directory =
+    configured === "~"
+      ? homedir()
+      : configured.startsWith("~/")
+        ? join(homedir(), configured.slice(2))
+        : configured;
+  const info = await lstat(directory).catch(() => undefined);
+
+  if (info === undefined) {
+    return "missing";
+  }
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    return "invalid";
+  }
+
+  try {
+    await access(directory, constants.W_OK);
+    return "writable";
+  } catch {
+    return "not-writable";
+  }
 }
 
 async function readSpaces(
@@ -638,6 +910,24 @@ interface ConfigMappingUpdateResult {
   readonly spaces: ZenAgentConfig["spaces"];
 }
 
+function currentConfigSettings(config: ZenAgentConfig | undefined): Readonly<{
+  profileMatch: "exact";
+  privateWindows: "hidden" | "explicit";
+  downloads: Readonly<{ directory: string }>;
+  backgroundLaunch: Readonly<{ policy: "disabled" }>;
+  speech: Readonly<{ installedLocales: readonly string[] }>;
+}> {
+  return {
+    profileMatch: "exact",
+    privateWindows: config?.privateWindows ?? "hidden",
+    downloads: config?.downloads ?? {
+      directory: DEFAULT_DOWNLOAD_DIRECTORY,
+    },
+    backgroundLaunch: config?.backgroundLaunch ?? { policy: "disabled" },
+    speech: config?.speech ?? { installedLocales: [] },
+  };
+}
+
 async function applyConfigMapping(
   update: ConfigMappingUpdate,
   dependencies: CliDependencies,
@@ -696,6 +986,7 @@ async function applyConfigMapping(
   const config = parseConfig({
     version: CONFIG_SCHEMA_VERSION,
     profile,
+    ...currentConfigSettings(update.existing),
     spaces: mappings,
     routing: update.existing?.routing ?? { rules: [] },
   });
@@ -708,6 +999,139 @@ async function applyConfigMapping(
   }
 
   return { path: update.destination, profile, spaces: mappings };
+}
+
+async function runConfigMigrate(
+  args: readonly string[],
+  dependencies: CliDependencies,
+): Promise<CliExitCode> {
+  const parsed = parseArguments(
+    args,
+    new Set(["--json"]),
+    new Set(["--config"]),
+  );
+  requirePositionals(
+    parsed,
+    0,
+    "Usage: zen-agent config migrate [--config <path>] [--json]",
+  );
+  const destination = option(parsed, "--config") ?? dependencies.configPath();
+  const existing = await dependencies.readConfig(destination);
+  if (existing === undefined) {
+    throw new CliInputError(
+      "Cannot migrate configuration because the file does not exist.",
+    );
+  }
+  const migrated = parseConfig({
+    ...existing,
+    version: CONFIG_SCHEMA_VERSION,
+    ...currentConfigSettings(existing),
+  });
+  await dependencies.writeConfig(destination, migrated);
+  const result = { path: destination, version: CONFIG_SCHEMA_VERSION };
+  writeResult(
+    "config.migrate",
+    result,
+    parsed.flags.has("--json"),
+    () =>
+      `Migrated ${destination} to configuration schema ${String(CONFIG_SCHEMA_VERSION)}.\n`,
+  );
+  return CLI_EXIT_CODES.success;
+}
+
+async function runSpeech(
+  args: readonly string[],
+  dependencies: CliDependencies,
+): Promise<CliExitCode> {
+  const [action, ...options] = args;
+  if (action === undefined || action === "help" || action === "--help") {
+    process.stdout.write(SPEECH_HELP);
+    return CLI_EXIT_CODES.success;
+  }
+  if (action === "locales") {
+    const parsed = parseArguments(options, new Set(["--json"]), new Set());
+    requirePositionals(parsed, 0, "Usage: zen-agent speech locales [--json]");
+    const result = dependencies.speechLocales();
+    writeResult("speech.locales", result, parsed.flags.has("--json"), () =>
+      [
+        `Supported locales: ${result.supportedLocales.join(", ") || "none"}`,
+        `Installed locales: ${result.installedLocales.join(", ") || "none"}`,
+        "",
+      ].join("\n"),
+    );
+    return CLI_EXIT_CODES.success;
+  }
+  if (action === "install") {
+    const parsed = parseArguments(
+      options,
+      new Set(["--json"]),
+      new Set(["--locale"]),
+    );
+    requirePositionals(
+      parsed,
+      0,
+      "Usage: zen-agent speech install --locale <canonical-bcp47> [--json]",
+    );
+    const locale = option(parsed, "--locale");
+    if (locale === undefined) {
+      throw new CliInputError("Speech model installation requires --locale.");
+    }
+    const existing = await dependencies.readConfig(dependencies.configPath());
+    if (existing === undefined) {
+      throw new CliInputError(
+        "Configure an exact Zen profile before installing speech assets.",
+      );
+    }
+    const result = dependencies.installSpeechLocale(locale);
+    const installedLocales = [
+      ...new Set([...(existing.speech?.installedLocales ?? []), result.locale]),
+    ].toSorted();
+    const updated = parseConfig({
+      ...existing,
+      version: CONFIG_SCHEMA_VERSION,
+      ...currentConfigSettings(existing),
+      speech: { installedLocales },
+    });
+    await dependencies.writeConfig(dependencies.configPath(), updated);
+    await reloadConfigAfterLocalWrite(existing.profile, dependencies);
+    writeResult(
+      "speech.install",
+      result,
+      parsed.flags.has("--json"),
+      () => `Installed on-device speech model for ${result.locale}.\n`,
+    );
+    return CLI_EXIT_CODES.success;
+  }
+  if (action === "transcribe") {
+    const parsed = parseArguments(
+      options,
+      new Set(["--json"]),
+      new Set(["--locale", "--input"]),
+    );
+    requirePositionals(
+      parsed,
+      0,
+      "Usage: zen-agent speech transcribe --locale <canonical-bcp47> --input <absolute-audio-path> [--json]",
+    );
+    const locale = option(parsed, "--locale");
+    const input = option(parsed, "--input");
+    if (locale === undefined || input === undefined) {
+      throw new CliInputError(
+        "Speech transcription requires --locale and --input.",
+      );
+    }
+    const result = dependencies.transcribeAudio(locale, input);
+    writeResult(
+      "speech.transcribe",
+      result,
+      parsed.flags.has("--json"),
+      () => `${result.text}\n`,
+    );
+    return CLI_EXIT_CODES.success;
+  }
+  throw new CliInputError(
+    `Unknown speech command: ${action}\n\n${SPEECH_HELP}`,
+  );
 }
 
 async function runConfigMap(
@@ -884,6 +1308,34 @@ function wizardServices(dependencies: CliDependencies): SetupWizardServices {
       );
       return { path: result.path, profile: result.profile };
     },
+    speechLocales: () => Promise.resolve(dependencies.speechLocales()),
+    installSpeechLocale: async (locale) => {
+      const path = dependencies.configPath();
+      const existing = await dependencies.readConfig(path);
+      if (existing === undefined) {
+        throw new CliInputError(
+          "Configure an exact Zen profile before installing speech assets.",
+        );
+      }
+      const result = dependencies.installSpeechLocale(locale);
+      const installedLocales = [
+        ...new Set([
+          ...(existing.speech?.installedLocales ?? []),
+          result.locale,
+        ]),
+      ].toSorted();
+      await dependencies.writeConfig(
+        path,
+        parseConfig({
+          ...existing,
+          version: CONFIG_SCHEMA_VERSION,
+          ...currentConfigSettings(existing),
+          speech: { installedLocales },
+        }),
+      );
+      await reloadConfigAfterLocalWrite(existing.profile, dependencies);
+      return { locale: result.locale };
+    },
   };
 }
 
@@ -926,6 +1378,8 @@ async function dispatch(
       return CLI_EXIT_CODES.success;
     case "status":
       return runStatus(rest, dependencies);
+    case "doctor":
+      return runDoctor(rest, dependencies);
     case "spaces":
       return runSpaces(rest, dependencies);
     case "config": {
@@ -936,6 +1390,10 @@ async function dispatch(
         return CLI_EXIT_CODES.success;
       }
 
+      if (action === "migrate") {
+        return runConfigMigrate(options, dependencies);
+      }
+
       if (action !== "map") {
         throw new CliInputError(
           `Unknown config command: ${action}\n\n${CONFIG_HELP}`,
@@ -944,6 +1402,8 @@ async function dispatch(
 
       return runConfigMap(options, dependencies);
     }
+    case "speech":
+      return runSpeech(rest, dependencies);
     case "native-host":
       return runNativeHostCommand(rest, dependencies);
     default:
